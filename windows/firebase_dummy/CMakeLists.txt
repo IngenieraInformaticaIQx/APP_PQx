@@ -1,0 +1,2 @@
+add_library(firebase_core INTERFACE)
+add_library(firebase_messaging INTERFACE)

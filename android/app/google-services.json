@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "472709317914",
+    "project_id": "pqxpush-77004",
+    "storage_bucket": "pqxpush-77004.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:472709317914:android:9a2cdc670a76978c2d18a3",
+        "android_client_info": {
+          "package_name": "com.example.untitled"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB-gBveHw5S2c82fgV_y_qQfPBe145U0x0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
