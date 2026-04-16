@@ -433,16 +433,6 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
           } catch (e) {
             debugPrint('PlateTapped parse error: $e');
           }
-        })
-      // JS envía coordenadas del tap en la placa
-        ..addJavaScriptChannel('PlateTapped', onMessageReceived: (msg) {
-          if (!mounted) return;
-          try {
-            final data = jsonDecode(msg.message) as Map<String, dynamic>;
-            setState(() => _tapPendiente = _TapData.fromJson(data));
-          } catch (e) {
-            debugPrint('PlateTapped parse error: $e');
-          }
         })..addJavaScriptChannel('ScrewPlaced', onMessageReceived: (msg) {
           try {
             final data = jsonDecode(msg.message) as Map<String, dynamic>;
@@ -1304,6 +1294,7 @@ function _invalidarCacheMeshes(){
   _meshCacheGeom = null;
   _meshCacheTray = null;
   _meshCacheAll  = null;
+  needsRender = true;
 }
 
 // Función auxiliar: comprueba que el mesh Y todos sus ancestros sean visibles
@@ -1450,6 +1441,7 @@ function cargarGlbBase64(id, b64){
     modelos[id].traverse(c=>{
       if(c.isMesh && !c.userData.esTrayectoria) c.visible = true;
     });
+    needsRender = true;
     return;
   }
   _showLayerLoading();
@@ -1853,10 +1845,12 @@ function _crearRegla(instanceId, tornilloObj, largoReal, nombre){
 
   scene.add(group);
   _reglas[instanceId] = group;
+  needsRender = true;
 }
 
 function toggleRegla(instanceId, v){
   if(_reglas[instanceId]) _reglas[instanceId].visible = v;
+  needsRender = true;
 }
 
 function eliminarRegla(instanceId){
@@ -1867,6 +1861,7 @@ function eliminarRegla(instanceId){
     if(c.material){ if(c.material.map) c.material.map.dispose(); c.material.dispose(); }
   });
   delete _reglas[instanceId];
+  needsRender = true;
 }
 
 // ── Eliminar tornillo ──────────────────────────────────────────────────────
@@ -1906,8 +1901,9 @@ function setOpacidad(id,op){
   modelos[id].traverse(c=>{
     if(c.isMesh){ c.material.transparent=op<1; c.material.opacity=op; c.material.needsUpdate=true; }
   });
+  needsRender = true;
 }
-function setAutoRotate(v){ controls.autoRotate=v; controls.autoRotateSpeed=1.5; }
+function setAutoRotate(v){ controls.autoRotate=v; controls.autoRotateSpeed=1.5; needsRender = true; }
 
 // ── Modo Rayos X: transparenta todos los huesos ──────────────────────────
 function setXray(op){
@@ -1922,6 +1918,7 @@ function setXray(op){
       }
     });
   }
+  needsRender = true;
 }
 
 // ── Iluminación ──────────────────────────────────────────────────────────
@@ -2155,6 +2152,7 @@ function addNota(id, x, y, z, texto){
   sprite.userData.notaId = id;
   scene.add(sprite);
   _notas3D[id] = sprite;
+  needsRender = true;
 }
 
 function _roundRect(ctx, x, y, w, h, r){
@@ -2168,6 +2166,7 @@ function _roundRect(ctx, x, y, w, h, r){
 
 function toggleNota(id, v){
   if(_notas3D[id]) _notas3D[id].visible = v;
+  needsRender = true;
 }
 
 function removeNota(id){
@@ -2175,6 +2174,7 @@ function removeNota(id){
   scene.remove(s);
   s.material.map.dispose(); s.material.dispose();
   delete _notas3D[id];
+  needsRender = true;
 }
 
 // ── Vistas rápidas con animación suave ───────────────────────────────────
@@ -2208,8 +2208,9 @@ function setVista(vista){
     camera.position.lerpVectors(startPos, targetPos, t);
     controls.target.lerpVectors(startTarget, center, t);
     controls.update();
+    needsRender = true;
     frame++;
-    if(frame > totalFrames){ clearInterval(anim); controls.update(); }
+    if(frame > totalFrames){ clearInterval(anim); controls.update(); needsRender = true; }
   }, 16);
 }
 
@@ -2247,7 +2248,7 @@ function limpiarTodo(){
     delete _reglasGuardadas[id];
   }
   // 6. Forzar render limpio
-  renderer.render(scene, camera);
+  needsRender = true;
 }
 
 window.visor={
@@ -2270,6 +2271,7 @@ window.visor={
     }
     cx.fillStyle=g; cx.fillRect(0,0,2,512);
     scene.background=new THREE.CanvasTexture(c);
+    needsRender = true;
   },
   capturarVista: function(v){
     // Mueve a la vista v, espera la animación y envía la imagen por CapturaVista
@@ -2433,9 +2435,19 @@ renderer.domElement.addEventListener('pointerup', e=>{
   }));
 });
 
-(function animate(){ requestAnimationFrame(animate); controls.update(); renderer.render(scene,camera); })();
+let needsRender = true;
+function animate(){
+  requestAnimationFrame(animate);
+  controls.update();
+  if(!needsRender) return;
+  renderer.render(scene,camera);
+  needsRender = false;
+}
+animate();
+controls.addEventListener('change', ()=>{ needsRender = true; });
 window.addEventListener('resize',()=>{
   camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth,innerHeight);
+  needsRender = true;
 });
 window._numBiomodelos = 0; // se sobreescribe desde Flutter antes de cargar GLBs
 setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorReady.postMessage('ready'); },500);
