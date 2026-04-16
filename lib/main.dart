@@ -6,15 +6,15 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:untitled/services/firebase_service.dart';
 import 'package:untitled/services/app_theme.dart';
+import 'package:untitled/services/notificaciones_service.dart';
 import 'firebase_options.dart';
 import 'screens/login_screen.dart';
 import 'screens/splash_screen.dart';
 
-final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin = FlutterLocalNotificationsPlugin();
-
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await AppTheme.load();
+
   try {
     if (FirebaseService.isAvailable) {
       await Firebase.initializeApp(
@@ -25,39 +25,17 @@ void main() async {
     debugPrint('Firebase init error: $e');
   }
 
-  Future<void> initNotificaciones() async {
-  const AndroidInitializationSettings androidSettings =
-      AndroidInitializationSettings('@mipmap/ic_launcher');
-  const DarwinInitializationSettings iosSettings =
-      DarwinInitializationSettings(
-    requestAlertPermission: true,
-    requestBadgePermission: true,
-    requestSoundPermission: true,
-  );
-  const InitializationSettings settings = InitializationSettings(
-    android: androidSettings,
-    iOS: iosSettings,
-  );
-  await flutterLocalNotificationsPlugin.initialize(settings);
-}
-
+  await initNotificaciones();
 
   if (FirebaseService.isAvailable) {
-    await initFCM();
+    try {
+      await initFCM();
+    } catch (e) {
+      debugPrint('FCM init error (ignorado en iOS): $e');
+    }
   }
 
   runApp(const MyApp());
-}
-
-Future<void> initNotificaciones() async {
-  const AndroidInitializationSettings androidSettings =
-  AndroidInitializationSettings('@mipmap/ic_launcher');
-
-  const InitializationSettings settings = InitializationSettings(
-    android: androidSettings,
-  );
-
-  await flutterLocalNotificationsPlugin.initialize(settings);
 }
 
 Future<void> mostrarNotificacion(RemoteMessage message) async {
@@ -89,7 +67,11 @@ Future<void> initFCM() async {
 
   await messaging.requestPermission();
 
-  final String? token = await messaging.getToken();
+  String? token;
+  if (Platform.isIOS) {
+    await Future.delayed(const Duration(seconds: 3));
+  }
+  token = await messaging.getToken();
   debugPrint('FCM TOKEN: $token');
 
   if (!Platform.isAndroid && !Platform.isIOS) return;
@@ -101,9 +83,7 @@ Future<void> initFCM() async {
   );
 
   FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-    debugPrint(
-      'Notificación recibida: ${message.notification?.title}',
-    );
+    debugPrint('Notificación recibida: ${message.notification?.title}');
     mostrarNotificacion(message);
   });
 }
