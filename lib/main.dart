@@ -25,7 +25,22 @@ void main() async {
     debugPrint('Firebase init error: $e');
   }
 
-  await initNotificaciones();
+  Future<void> initNotificaciones() async {
+  const AndroidInitializationSettings androidSettings =
+      AndroidInitializationSettings('@mipmap/ic_launcher');
+  const DarwinInitializationSettings iosSettings =
+      DarwinInitializationSettings(
+    requestAlertPermission: true,
+    requestBadgePermission: true,
+    requestSoundPermission: true,
+  );
+  const InitializationSettings settings = InitializationSettings(
+    android: androidSettings,
+    iOS: iosSettings,
+  );
+  await flutterLocalNotificationsPlugin.initialize(settings);
+}
+
 
   if (FirebaseService.isAvailable) {
     await initFCM();
