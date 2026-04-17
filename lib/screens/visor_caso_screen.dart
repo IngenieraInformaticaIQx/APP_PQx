@@ -15,6 +15,9 @@ import 'planificacion_local.dart';
 import 'package:untitled/services/app_theme.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:untitled/widgets/audio_notas_panel.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:uuid/uuid.dart';
+import 'visor_pdf_screen.dart';
 
 // ── Modelos de datos ──────────────────────────────────────────────────────
 
@@ -3943,10 +3946,45 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
                           final pdfUrl = nombre.startsWith('http')
                               ? nombre
                               : docUrl + nombre;
-                          final pdfUri = Uri.parse(pdfUrl)
-                              .replace(userInfo: '$email:$password');
-                          await launchUrl(pdfUri,
-                              mode: LaunchMode.externalApplication);
+                          if (!mounted) return;
+                          showDialog(
+                            context: context,
+                            barrierDismissible: false,
+                            builder: (_) => const Center(
+                              child: CircularProgressIndicator(),
+                            ),
+                          );
+                          try {
+                            final resp = await http.get(
+                              Uri.parse(pdfUrl),
+                              headers: {'Authorization': 'Basic $credentials'},
+                            ).timeout(const Duration(seconds: 30));
+                            if (!mounted) return;
+                            Navigator.of(context, rootNavigator: true).pop();
+                            if (resp.statusCode == 200) {
+                              final tmpDir  = await getTemporaryDirectory();
+                              final tmpFile = File('${tmpDir.path}/${const Uuid().v4()}.pdf');
+                              await tmpFile.writeAsBytes(resp.bodyBytes);
+                              if (!mounted) return;
+                              Navigator.push(context, MaterialPageRoute(
+                                builder: (_) => VisorPdfScreen(
+                                  rutaLocal: tmpFile.path,
+                                  nombre: nombre,
+                                ),
+                              ));
+                            } else {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(content: Text('Error al descargar PDF (${resp.statusCode})')),
+                              );
+                            }
+                          } catch (e) {
+                            if (mounted) {
+                              Navigator.of(context, rootNavigator: true).pop();
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(content: Text('Error: $e')),
+                              );
+                            }
+                          }
                         },
                         child: Padding(
                           padding: const EdgeInsets.symmetric(
