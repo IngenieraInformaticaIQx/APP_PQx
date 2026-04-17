@@ -49,16 +49,32 @@ class _AudioNotasPanelState extends State<AudioNotasPanel> {
   }
 
   Future<void> _iniciarGrabacion() async {
-    final hasPermission = await _recorder.hasPermission();
-    if (!hasPermission) return;
-    final id   = const Uuid().v4();
-    final ruta = await AudioNotasService.nuevaRuta(widget.casoId, id);
-    _rutaActual = ruta;
-    await _recorder.start(RecordConfig(encoder: AudioEncoder.aacLc), path: ruta);
-    setState(() { _grabando = true; _segGrabando = 0; });
-    _timerGrabacion = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (mounted) setState(() => _segGrabando++);
-    });
+    try {
+      final hasPermission = await _recorder.hasPermission();
+      if (!hasPermission) {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Permiso de micrófono denegado'),
+          backgroundColor: Colors.redAccent,
+          duration: Duration(seconds: 3),
+        ));
+        return;
+      }
+      final id   = const Uuid().v4();
+      final ruta = await AudioNotasService.nuevaRuta(widget.casoId, id);
+      _rutaActual = ruta;
+      await _recorder.start(RecordConfig(encoder: AudioEncoder.aacLc), path: ruta);
+      setState(() { _grabando = true; _segGrabando = 0; });
+      _timerGrabacion = Timer.periodic(const Duration(seconds: 1), (_) {
+        if (mounted) setState(() => _segGrabando++);
+      });
+    } catch (e) {
+      debugPrint('Error al grabar: $e');
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('Error al iniciar grabación: $e'),
+        backgroundColor: Colors.redAccent,
+        duration: const Duration(seconds: 3),
+      ));
+    }
   }
 
   Future<void> _pararGrabacion() async {
