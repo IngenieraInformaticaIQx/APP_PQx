@@ -14,6 +14,7 @@ import 'visor_windows.dart';
 import 'planificacion_local.dart';
 import 'package:untitled/services/app_theme.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:untitled/widgets/audio_notas_panel.dart';
 
 // ── Modelos de datos ──────────────────────────────────────────────────────
 
@@ -301,6 +302,8 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
   // Tap pendiente para mostrar popup
   _TapData? _tapPendiente;
   bool _guiasVisibles = true;
+  TornilloColocado? _screwInfoTc;
+  double _screwInfoSx = 0, _screwInfoSy = 0;
   bool _planGuardado  = false;
 
   // Visualización
@@ -430,7 +433,7 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
           if (!mounted) return;
           try {
             final data = jsonDecode(msg.message) as Map<String, dynamic>;
-            setState(() => _tapPendiente = _TapData.fromJson(data));
+            setState(() { _tapPendiente = _TapData.fromJson(data); _screwInfoTc = null; });
           } catch (e) {
             debugPrint('PlateTapped parse error: $e');
           }
@@ -528,6 +531,21 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
           } catch (e) {
             debugPrint('NotaTap error: $e');
           }
+        })..addJavaScriptChannel('ScrewTapped', onMessageReceived: (msg) {
+          if (!mounted) return;
+          try {
+            final d = jsonDecode(msg.message) as Map<String, dynamic>;
+            final instanceId = d['instanceId'] as String? ?? '';
+            final tc = _tornillosColocados.firstWhere(
+              (t) => t.instanceId == instanceId,
+              orElse: () => throw StateError('not found'),
+            );
+            setState(() {
+              _screwInfoTc = tc;
+              _screwInfoSx = (d['sx'] as num).toDouble();
+              _screwInfoSy = (d['sy'] as num).toDouble();
+            });
+          } catch (_) {}
         })
 
         ..loadHtmlString(_patchHtmlTheme(_buildHtml()));
@@ -2352,6 +2370,29 @@ renderer.domElement.addEventListener('pointerup', e=>{
   pointer.x  =  ((e.clientX-rect.left)/rect.width )*2-1;
   pointer.y  = -((e.clientY-rect.top) /rect.height)*2+1;
 
+  // Detectar tap sobre tornillo colocado → mostrar etiqueta info
+  const screwMeshes = [];
+  for(const id in modelos){
+    const m = modelos[id];
+    if(m.userData && m.userData.instanceId && String(m.userData.instanceId).startsWith('screw_')){
+      m.traverse(c=>{ if(c.isMesh && c.visible) screwMeshes.push(c); });
+    }
+  }
+  if(screwMeshes.length > 0){
+    const rcS = new THREE.Raycaster();
+    rcS.setFromCamera({x:pointer.x, y:pointer.y}, camera);
+    const screwHits = rcS.intersectObjects(screwMeshes, false);
+    if(screwHits.length > 0){
+      let hitId = null;
+      let node = screwHits[0].object;
+      while(node){ if(node.userData && node.userData.instanceId){ hitId = node.userData.instanceId; break; } node=node.parent; }
+      if(hitId){
+        ScrewTapped.postMessage(JSON.stringify({instanceId: hitId, sx: e.clientX, sy: e.clientY}));
+        return;
+      }
+    }
+  }
+
   raycaster.setFromCamera(pointer, camera);
 
   // Solo trayectorias cuyo modelo padre esté completamente visible — usa caché
@@ -2485,7 +2526,7 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
 // Adaptador: convierte XYZ.postMessage(msg) en window.chrome.webview.postMessage({channel:'XYZ',msg:msg})
 (function(){
   const channels = ['VisorReady','PlateTapped','ScrewPlaced','VisorLog','TornilloListo',
-                    'CapturaVista','Captura','ReglaLibre','NotaTap'];
+                    'CapturaVista','Captura','ReglaLibre','NotaTap','ScrewTapped'];
   channels.forEach(function(ch){
     window[ch] = { postMessage: function(m){ window.chrome.webview.postMessage(JSON.stringify({channel:ch,msg:m})); } };
   });
@@ -2629,6 +2670,32 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
             ),
             // Vistas rápidas
             if (_vistasPanelVisible) _buildVistaPanel(),
+            // Botón notas de voz
+            Positioned(
+              bottom: 42, left: 102,
+              child: RepaintBoundary(
+                child: GestureDetector(
+                  onTap: _abrirNotasVoz,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(20),
+                    child: BackdropFilter(
+                      filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+                      child: Container(
+                        width: 36, height: 36,
+                        decoration: BoxDecoration(
+                          color: AppTheme.cardBg1,
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(color: AppTheme.cardBorder, width: 1.5),
+                          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 8, offset: const Offset(0, 3))],
+                        ),
+                        child: Center(child: Icon(Icons.mic_outlined,
+                            size: 17, color: AppTheme.darkText.withOpacity(0.7))),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
             // Botón PDF documentación
             Positioned(
               bottom: 42, left: 58,
@@ -2778,7 +2845,73 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
             if (_planoCortando) _buildPanelCorte(),
             // Popup de selección de tornillo
             if (_tapPendiente != null) _buildScrewPopup(context),
+            // Etiqueta info tornillo
+            if (_screwInfoTc != null) ...[
+              Positioned.fill(
+                child: GestureDetector(
+                  behavior: HitTestBehavior.translucent,
+                  onTap: () => setState(() => _screwInfoTc = null),
+                ),
+              ),
+              _buildScrewInfoLabel(context),
+            ],
           ]),
+        ),
+      ),
+    );
+  }
+
+  // ── Etiqueta info tornillo (tap sobre tornillo colocado) ──────────────────
+  Widget _buildScrewInfoLabel(BuildContext context) {
+    final tc = _screwInfoTc!;
+    final screen = MediaQuery.of(context).size;
+    const topBarH = 64.0;
+    const cardW = 180.0;
+    const cardH = 72.0;
+    const margin = 12.0;
+
+    double left = _screwInfoSx - cardW / 2;
+    double top  = _screwInfoSy + topBarH + 12;
+
+    left = left.clamp(margin, screen.width  - cardW - margin);
+    if (top + cardH > screen.height - margin) top = _screwInfoSy + topBarH - cardH - 12;
+    top  = top.clamp(topBarH + margin, screen.height - cardH - margin);
+
+    return Positioned(
+      left: left, top: top,
+      child: GestureDetector(
+        onTap: () => setState(() => _screwInfoTc = null),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(14),
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+            child: Container(
+              width: cardW,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                color: AppTheme.sheetBg,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: _C.accentScrew.withOpacity(0.45), width: 1.5),
+                boxShadow: [BoxShadow(color: _C.accentScrew.withOpacity(0.12), blurRadius: 16, offset: const Offset(0, 4))],
+              ),
+              child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Row(children: [
+                  Icon(Icons.hardware_outlined, size: 13, color: _C.accentScrew),
+                  const SizedBox(width: 6),
+                  Expanded(child: _marqueeText(_nombreCorto(tc.nombre),
+                      TextStyle(color: AppTheme.darkText, fontSize: 12, fontWeight: FontWeight.w700))),
+                ]),
+                const SizedBox(height: 6),
+                Text(_labelDiamLargo(tc.nombre),
+                    style: TextStyle(color: _C.accentScrew, fontSize: 11, fontWeight: FontWeight.w600)),
+                if (tc.largo > 0) ...[
+                  const SizedBox(height: 2),
+                  Text('Largo: ${tc.largo.toStringAsFixed(0)} mm',
+                      style: TextStyle(color: AppTheme.subtitleColor, fontSize: 10)),
+                ],
+              ]),
+            ),
+          ),
         ),
       ),
     );
@@ -3848,6 +3981,18 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  void _abrirNotasVoz() {
+    showDialog(
+      context: context,
+      barrierColor: Colors.black.withOpacity(0.35),
+      builder: (_) => Dialog(
+        backgroundColor: Colors.transparent,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
+        child: AudioNotasPanel(casoId: widget.caso.id),
       ),
     );
   }
