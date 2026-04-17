@@ -1246,7 +1246,7 @@ const camera = new THREE.PerspectiveCamera(45, innerWidth/innerHeight, 0.1, 2000
 camera.position.set(0,0,500);
 
 const renderer = new THREE.WebGLRenderer({antialias:true, logarithmicDepthBuffer:true, preserveDrawingBuffer:true});
-renderer.setPixelRatio(devicePixelRatio);
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.setSize(innerWidth, innerHeight);
 renderer.shadowMap.enabled = true;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -2631,13 +2631,13 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
                 ),
               ),
             ),
-            // Botón captura pantalla (oculto en flujo IA)
+            // Botón Exportar (fuera, oculto en flujo IA)
             if (!widget.autoCargar)
             Positioned(
               bottom: 88, right: 14,
               child: RepaintBoundary(
                 child: GestureDetector(
-                  onTap: () => _jsRun("window.visor.capturarPantalla();"),
+                  onTap: _exportarJSON,
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(20),
                     child: BackdropFilter(
@@ -2652,9 +2652,9 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
                           boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 8, offset: const Offset(0, 3))],
                         ),
                         child: Row(mainAxisSize: MainAxisSize.min, children: [
-                          Icon(Icons.camera_alt_outlined, size: 14, color: AppTheme.darkText.withOpacity(0.7)),
+                          Icon(Icons.upload_outlined, size: 14, color: AppTheme.darkText.withOpacity(0.7)),
                           const SizedBox(width: 6),
-                          Text('Captura', style: TextStyle(
+                          Text('Exportar', style: TextStyle(
                               color: AppTheme.darkText.withOpacity(0.7),
                               fontSize: 12, fontWeight: FontWeight.w700)),
                         ]),
@@ -2664,97 +2664,62 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
                 ),
               ),
             ),
-            // Botones esquina inferior derecha
+            // Botón Guardar / Actualizar
             Positioned(
               bottom: 42, right: 14,
               child: RepaintBoundary(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    // Botón Guardar / Actualizar / Exportar
-                    GestureDetector(
-                      onTap: widget.autoCargar
-                          ? (_planGuardado ? null : _guardarEnMisPlanificaciones)
-                          : widget.sesionGuardada != null
-                              ? _actualizarSesion
-                              : (widget.modoGenerico ? _guardarSesion : _exportarJSON),
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(20),
-                        child: BackdropFilter(
-                          filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
-                          child: Container(
-                            height: 36,
-                            padding: const EdgeInsets.symmetric(horizontal: 14),
-                            decoration: BoxDecoration(
-                              color: (widget.autoCargar
-                                  ? const Color(0xFF8E44AD)
-                                  : const Color(0xFF34A853)).withOpacity(0.15),
-                              borderRadius: BorderRadius.circular(20),
-                              border: Border.all(
-                                color: (widget.autoCargar
-                                    ? const Color(0xFF8E44AD)
-                                    : const Color(0xFF34A853)).withOpacity(0.45),
-                                width: 1.5,
-                              ),
-                              boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 8, offset: const Offset(0, 3))],
-                            ),
-                            child: Row(mainAxisSize: MainAxisSize.min, children: [
-                              Icon(
-                                widget.autoCargar
-                                    ? (_planGuardado ? Icons.check_circle_outline : Icons.save_outlined)
-                                    : (widget.sesionGuardada != null ? Icons.save_outlined : Icons.bookmark_add_outlined),
-                                size: 14,
-                                color: widget.autoCargar
-                                    ? const Color(0xFF8E44AD)
-                                    : const Color(0xFF34A853),
-                              ),
-                              const SizedBox(width: 6),
-                              Text(
-                                widget.autoCargar
-                                    ? (_planGuardado ? 'Guardado' : 'Guardar')
-                                    : (widget.sesionGuardada != null ? 'Actualizar' : (widget.modoGenerico ? 'Guardar' : 'Exportar')),
-                                style: TextStyle(
-                                  color: widget.autoCargar
-                                      ? const Color(0xFF8E44AD)
-                                      : const Color(0xFF34A853),
-                                  fontSize: 12, fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                            ]),
+                child: GestureDetector(
+                  onTap: widget.autoCargar
+                      ? (_planGuardado ? null : _guardarEnMisPlanificaciones)
+                      : widget.sesionGuardada != null
+                          ? _actualizarSesion
+                          : _guardarSesion,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(20),
+                    child: BackdropFilter(
+                      filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+                      child: Container(
+                        height: 36,
+                        padding: const EdgeInsets.symmetric(horizontal: 14),
+                        decoration: BoxDecoration(
+                          color: (widget.autoCargar
+                              ? const Color(0xFF8E44AD)
+                              : const Color(0xFF34A853)).withOpacity(0.15),
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(
+                            color: (widget.autoCargar
+                                ? const Color(0xFF8E44AD)
+                                : const Color(0xFF34A853)).withOpacity(0.45),
+                            width: 1.5,
                           ),
+                          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 8, offset: const Offset(0, 3))],
                         ),
+                        child: Row(mainAxisSize: MainAxisSize.min, children: [
+                          Icon(
+                            widget.autoCargar
+                                ? (_planGuardado ? Icons.check_circle_outline : Icons.save_outlined)
+                                : Icons.bookmark_add_outlined,
+                            size: 14,
+                            color: widget.autoCargar
+                                ? const Color(0xFF8E44AD)
+                                : const Color(0xFF34A853),
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            widget.autoCargar
+                                ? (_planGuardado ? 'Guardado' : 'Guardar')
+                                : (widget.sesionGuardada != null ? 'Actualizar' : 'Guardar'),
+                            style: TextStyle(
+                              color: widget.autoCargar
+                                  ? const Color(0xFF8E44AD)
+                                  : const Color(0xFF34A853),
+                              fontSize: 12, fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ]),
                       ),
                     ),
-                    // Botón Exportar adicional (solo cuando se abre desde Listados)
-                    if (widget.sesionGuardada != null) ...[
-                      const SizedBox(height: 8),
-                      GestureDetector(
-                        onTap: _exportarJSON,
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(20),
-                          child: BackdropFilter(
-                            filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
-                            child: Container(
-                              height: 36,
-                              padding: const EdgeInsets.symmetric(horizontal: 14),
-                              decoration: BoxDecoration(
-                                color: AppTheme.cardBg1,
-                                borderRadius: BorderRadius.circular(20),
-                                border: Border.all(color: AppTheme.cardBorder, width: 1.5),
-                                boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 8, offset: const Offset(0, 3))],
-                              ),
-                              child: Row(mainAxisSize: MainAxisSize.min, children: [
-                                Icon(Icons.ios_share, size: 14, color: AppTheme.darkText.withOpacity(0.7)),
-                                const SizedBox(width: 6),
-                                Text('Exportar', style: TextStyle(color: AppTheme.darkText.withOpacity(0.7), fontSize: 12, fontWeight: FontWeight.w700)),
-                              ]),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ],
+                  ),
                 ),
               ),
             ),
