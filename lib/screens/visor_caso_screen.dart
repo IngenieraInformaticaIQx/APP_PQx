@@ -13,6 +13,7 @@ import 'dart:io';
 import 'visor_windows.dart';
 import 'planificacion_local.dart';
 import 'package:untitled/services/app_theme.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 // ── Modelos de datos ──────────────────────────────────────────────────────
 
@@ -2574,8 +2575,26 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
               ),
             ),
             // Watermark se renderiza dentro del WebView
+            // Doble tap para abrir el panel lateral
+            if (!_panelAbierto)
+              Positioned(
+                top: 64, left: 0, right: 0, bottom: 0,
+                child: GestureDetector(
+                  behavior: HitTestBehavior.translucent,
+                  onDoubleTap: () => setState(() => _panelAbierto = true),
+                ),
+              ),
             _buildTopBar(),
             _buildBtnLimpiar(),
+            // Overlay para cerrar el panel lateral al tocar fuera (excluye topbar)
+            if (_panelAbierto)
+              Positioned(
+                top: 64, left: 0, right: 0, bottom: 0,
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => setState(() => _panelAbierto = false),
+                ),
+              ),
             _buildPanelLateral(),
             // Hint inferior
             Positioned(
@@ -2604,6 +2623,32 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
             ),
             // Vistas rápidas
             if (_vistasPanelVisible) _buildVistaPanel(),
+            // Botón PDF documentación
+            Positioned(
+              bottom: 42, left: 58,
+              child: RepaintBoundary(
+                child: GestureDetector(
+                  onTap: _abrirPdfCaso,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(20),
+                    child: BackdropFilter(
+                      filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+                      child: Container(
+                        width: 36, height: 36,
+                        decoration: BoxDecoration(
+                          color: AppTheme.cardBg1,
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(color: AppTheme.cardBorder, width: 1.5),
+                          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 8, offset: const Offset(0, 3))],
+                        ),
+                        child: Center(child: Icon(Icons.picture_as_pdf_outlined,
+                            size: 17, color: AppTheme.darkText.withOpacity(0.7))),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
             // Botón info esquina inferior izquierda
             Positioned(
               bottom: 42, left: 14,
@@ -3666,6 +3711,65 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
   }
 
   // ── Top bar ───────────────────────────────────────────────────────────────
+  Future<void> _abrirPdfCaso() async {
+    // Obtener cualquier URL de GLB para derivar la carpeta raíz del caso
+    final todosGlb = [
+      ...widget.caso.biomodelos,
+      ...widget.caso.placas.expand((g) => g.placas),
+      ...widget.caso.tornillos.expand((g) => g.tornillos),
+    ];
+    if (todosGlb.isEmpty) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Aún no hay documentación generada'),
+        backgroundColor: Colors.black87,
+        duration: Duration(seconds: 3),
+      ));
+      return;
+    }
+
+    // Subir un nivel desde la subcarpeta (Placas/, Biomodelos/, etc.) → carpeta raíz del caso
+    final uri = Uri.parse(todosGlb.first.url);
+    final segments = uri.pathSegments; // [..., 'CASEFOLDER', 'Placas', 'archivo.glb']
+    if (segments.length < 2) return;
+    final rootPath = '/' + segments.take(segments.length - 2).join('/') + '/';
+    final rootUrl = uri.scheme + '://' + uri.host + rootPath;
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final email    = prefs.getString('login_email')    ?? '';
+      final password = prefs.getString('login_password') ?? '';
+      final credentials = base64Encode(utf8.encode('$email:$password'));
+
+      final resp = await http.get(
+        Uri.parse(rootUrl),
+        headers: {'Authorization': 'Basic $credentials'},
+      ).timeout(const Duration(seconds: 10));
+
+      if (resp.statusCode == 200) {
+        final match = RegExp(r'href="([^"]+\.pdf)"', caseSensitive: false)
+            .firstMatch(resp.body);
+        if (match != null) {
+          final pdfHref = match.group(1)!;
+          final pdfUrl = pdfHref.startsWith('http')
+              ? pdfHref
+              : rootUrl + pdfHref;
+          // Construir URL con credenciales embebidas para que el navegador las envíe
+          final pdfUri = Uri.parse(pdfUrl).replace(
+            userInfo: '$email:$password',
+          );
+          await launchUrl(pdfUri, mode: LaunchMode.externalApplication);
+          return;
+        }
+      }
+    } catch (_) {}
+
+    if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+      content: Text('Aún no hay documentación generada'),
+      backgroundColor: Colors.black87,
+      duration: Duration(seconds: 3),
+    ));
+  }
+
   Widget _buildTopBar() {
     return Positioned(
       top: 0, left: 0, right: 0,
@@ -3748,12 +3852,12 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
         onVerticalDragUpdate: (d) {
           setState(() {
             _panelTopOffset = (_panelTopOffset + d.delta.dy).clamp(
-              MediaQuery.of(context).padding.top + 8.0, // límite superior: bajo el notch
-              MediaQuery.of(context).size.height - 200.0, // límite inferior: no llega a botones
+              MediaQuery.of(context).padding.top + 8.0,
+              MediaQuery.of(context).size.height - 200.0,
             );
           });
         },
-        behavior: HitTestBehavior.translucent,
+        behavior: HitTestBehavior.opaque,
       child: ClipRRect(
         borderRadius: BorderRadius.circular(20),
         child: BackdropFilter(
