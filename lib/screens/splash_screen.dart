@@ -255,10 +255,10 @@ class _SplashScreenState extends State<SplashScreen>
                     child: FadeTransition(
                       opacity: _titleFade,
                       child: Text(
-                        'PQx',
+                        'Bienvenido',
                         style: TextStyle(
                           color: AppTheme.darkText,
-                          fontSize: 52,
+                          fontSize: 20,
                           fontWeight: FontWeight.w900,
                           letterSpacing: -2,
                           height: 1,
