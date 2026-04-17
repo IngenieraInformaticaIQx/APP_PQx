@@ -1033,11 +1033,16 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
       } else if (_visorListo) {
         _descargarYCargarGlb(idx);
       }
-      // Re-aplicar visibilidad de trayectorias al mostrar
+      // Las trayectorias arrancan invisibles tras cargar — aplicar estado correcto con delay
       final trayVis = _trayectoriasVis[idx] ?? true;
-      if (!trayVis) _jsToggleTrayectoriasGlb(idx, false);
+      final mostrarGuias = trayVis && _guiasVisibles;
+      Future.delayed(const Duration(milliseconds: 400), () {
+        if (mounted) _jsToggleTrayectoriasGlb(idx, mostrarGuias);
+      });
     } else {
       _jsToggleGlb(idx, false);
+      // Ocultar también las guías de esta capa
+      _jsToggleTrayectoriasGlb(idx, false);
     }
   }
 
@@ -1122,6 +1127,7 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
         hdy: (t['hdy'] as num? ?? 0).toDouble(),
         hdz: (t['hdz'] as num? ?? 0).toDouble(),
         usarTrayectoria: t['usarTrayectoria'] as bool? ?? false,
+        visible: false,
       );
       setState(() => _tornillosColocados.add(tc));
       _colocadosVersion.value++;
@@ -3712,58 +3718,143 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
 
   // ── Top bar ───────────────────────────────────────────────────────────────
   Future<void> _abrirPdfCaso() async {
-    // Obtener cualquier URL de GLB para derivar la carpeta raíz del caso
     final todosGlb = [
       ...widget.caso.biomodelos,
       ...widget.caso.placas.expand((g) => g.placas),
       ...widget.caso.tornillos.expand((g) => g.tornillos),
     ];
-    if (todosGlb.isEmpty) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('Aún no hay documentación generada'),
-        backgroundColor: Colors.black87,
-        duration: Duration(seconds: 3),
-      ));
-      return;
-    }
+    if (todosGlb.isEmpty) { _sinDocumentacion(); return; }
 
-    // Subir un nivel desde la subcarpeta (Placas/, Biomodelos/, etc.) → carpeta raíz del caso
+    // Derivar carpeta relativa del caso desde la URL del primer GLB
     final uri = Uri.parse(todosGlb.first.url);
-    final segments = uri.pathSegments; // [..., 'CASEFOLDER', 'Placas', 'archivo.glb']
-    if (segments.length < 2) return;
-    final rootPath = '/' + segments.take(segments.length - 2).join('/') + '/';
-    final rootUrl = uri.scheme + '://' + uri.host + rootPath;
+    final segments = uri.pathSegments;
+    if (segments.length < 2) { _sinDocumentacion(); return; }
+    // Ruta relativa desde public_html/profesional/ → carpeta raíz del caso + documentacion
+    final casoRelPath = segments.take(segments.length - 2).join('/');
+    final carpetaParam = Uri.encodeComponent('$casoRelPath/documentacion');
 
+    final prefs = await SharedPreferences.getInstance();
+    final email    = prefs.getString('login_email')    ?? '';
+    final password = prefs.getString('login_password') ?? '';
+    final credentials = base64Encode(utf8.encode('$email:$password'));
+
+    final apiUrl = 'https://profesional.planificacionquirurgica.com/listar_docs.php?carpeta=$carpetaParam';
+    debugPrint('📄 PDF apiUrl: $apiUrl');
+
+    List<String> pdfs = [];
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final email    = prefs.getString('login_email')    ?? '';
-      final password = prefs.getString('login_password') ?? '';
-      final credentials = base64Encode(utf8.encode('$email:$password'));
-
       final resp = await http.get(
-        Uri.parse(rootUrl),
+        Uri.parse(apiUrl),
         headers: {'Authorization': 'Basic $credentials'},
       ).timeout(const Duration(seconds: 10));
 
-      if (resp.statusCode == 200) {
-        final match = RegExp(r'href="([^"]+\.pdf)"', caseSensitive: false)
-            .firstMatch(resp.body);
-        if (match != null) {
-          final pdfHref = match.group(1)!;
-          final pdfUrl = pdfHref.startsWith('http')
-              ? pdfHref
-              : rootUrl + pdfHref;
-          // Construir URL con credenciales embebidas para que el navegador las envíe
-          final pdfUri = Uri.parse(pdfUrl).replace(
-            userInfo: '$email:$password',
-          );
-          await launchUrl(pdfUri, mode: LaunchMode.externalApplication);
-          return;
-        }
-      }
-    } catch (_) {}
+      debugPrint('📄 PDF status: ${resp.statusCode} body: ${resp.body}');
 
-    if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+      if (resp.statusCode == 200) {
+        final data = jsonDecode(resp.body) as Map<String, dynamic>;
+        pdfs = List<String>.from(data['pdfs'] ?? []);
+      }
+    } catch (e) { debugPrint('📄 PDF error: $e'); }
+
+    // URL base para construir enlaces directos a los PDFs
+    final rootPath = '/' + segments.take(segments.length - 2).join('/') + '/';
+    final docUrl = Uri.encodeFull(uri.scheme + '://' + uri.host + rootPath + 'documentacion/');
+
+    if (pdfs.isEmpty) { _sinDocumentacion(); return; }
+    if (!mounted) return;
+
+    // Panel de selección
+    showDialog(
+      context: context,
+      barrierColor: Colors.black.withOpacity(0.45),
+      builder: (_) => AlertDialog(
+        backgroundColor: Colors.transparent,
+        contentPadding: EdgeInsets.zero,
+        content: ClipRRect(
+          borderRadius: BorderRadius.circular(24),
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
+            child: Container(
+              width: 320,
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 8),
+              decoration: BoxDecoration(
+                color: AppTheme.sheetBg,
+                borderRadius: BorderRadius.circular(24),
+                border: Border.all(color: AppTheme.cardBorder, width: 1.5),
+              ),
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                Icon(Icons.folder_open_outlined, size: 32,
+                    color: const Color(0xFF2A7FF5)),
+                const SizedBox(height: 10),
+                Text('Documentación',
+                    style: TextStyle(color: AppTheme.darkText,
+                        fontSize: 17, fontWeight: FontWeight.w800)),
+                const SizedBox(height: 4),
+                Text('Selecciona un documento para abrirlo',
+                    style: TextStyle(color: AppTheme.subtitleColor, fontSize: 12),
+                    textAlign: TextAlign.center),
+                const SizedBox(height: 14),
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxHeight: 320),
+                  child: ListView.separated(
+                    shrinkWrap: true,
+                    itemCount: pdfs.length,
+                    separatorBuilder: (_, __) => Divider(
+                        height: 1, color: AppTheme.cardBorder),
+                    itemBuilder: (ctx, i) {
+                      final nombre = pdfs[i];
+                      return InkWell(
+                        borderRadius: BorderRadius.circular(12),
+                        onTap: () async {
+                          Navigator.pop(ctx);
+                          final pdfUrl = nombre.startsWith('http')
+                              ? nombre
+                              : docUrl + nombre;
+                          final pdfUri = Uri.parse(pdfUrl)
+                              .replace(userInfo: '$email:$password');
+                          await launchUrl(pdfUri,
+                              mode: LaunchMode.externalApplication);
+                        },
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                              vertical: 12, horizontal: 4),
+                          child: Row(children: [
+                            Icon(Icons.picture_as_pdf_outlined,
+                                size: 20, color: const Color(0xFFE53935)),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: _marqueeText(nombre, TextStyle(
+                                  color: AppTheme.darkText,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600)),
+                            ),
+                            Icon(Icons.chevron_right,
+                                size: 18, color: AppTheme.subtitleColor),
+                          ]),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+                const SizedBox(height: 4),
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: Text('Cerrar',
+                      style: TextStyle(
+                          color: AppTheme.subtitleColor,
+                          fontWeight: FontWeight.w600)),
+                ),
+              ]),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _sinDocumentacion() {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
       content: Text('Aún no hay documentación generada'),
       backgroundColor: Colors.black87,
       duration: Duration(seconds: 3),
