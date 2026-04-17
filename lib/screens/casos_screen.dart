@@ -5,6 +5,7 @@ import 'dart:convert';
 import 'dart:ui';
 import 'dart:math' as math;
 import 'visor_caso_screen.dart';
+import 'detalle_caso_screen.dart';
 import 'package:untitled/services/app_theme.dart';
 
 // Los modelos GlbArchivo y CasoMedico están definidos en visor_caso_screen.dart
@@ -398,10 +399,9 @@ class _CasosScreenState extends State<CasosScreen>
           Navigator.push(
             context,
             MaterialPageRoute(
-              builder: (_) => VisorCasoScreen(
+              builder: (_) => DetalleCasoScreen(
                 caso: caso,
                 onEstadoCambiado: (nuevoEstado) {
-                  // Actualizar el card en CasosScreen sin recargar toda la lista
                   setState(() {
                     final idx = _casos.indexWhere((c) => c.id == caso.id);
                     if (idx >= 0) {
@@ -421,7 +421,6 @@ class _CasosScreenState extends State<CasosScreen>
               ),
             ),
           ).then((_) {
-            // Notificar al menú para que recargue el último caso al volver
             widget.onVolverAlMenu?.call();
           });
         }
