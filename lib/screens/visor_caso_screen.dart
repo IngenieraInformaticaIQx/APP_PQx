@@ -4031,7 +4031,7 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
       builder: (_) => Dialog(
         backgroundColor: Colors.transparent,
         insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
-        child: AudioNotasPanel(casoId: widget.caso.id),
+        child: AudioNotasPanel(casoId: widget.planLocal?.id ?? widget.caso.id),
       ),
     );
   }
