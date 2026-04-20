@@ -2641,7 +2641,7 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
               Positioned(
                 top: 64, left: 0, right: 0, bottom: 0,
                 child: GestureDetector(
-                  behavior: HitTestBehavior.opaque,
+                  behavior: HitTestBehavior.translucent,
                   onTap: () => setState(() => _panelAbierto = false),
                 ),
               ),
