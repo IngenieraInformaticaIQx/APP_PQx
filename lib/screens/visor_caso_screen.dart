@@ -14,9 +14,9 @@ import 'visor_windows.dart';
 import 'planificacion_local.dart';
 import 'package:untitled/services/app_theme.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:untitled/widgets/audio_notas_panel.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
+import 'package:untitled/widgets/audio_notas_panel.dart';
 import 'visor_pdf_screen.dart';
 
 // ── Modelos de datos ──────────────────────────────────────────────────────
@@ -3963,7 +3963,8 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
                             Navigator.of(context, rootNavigator: true).pop();
                             if (resp.statusCode == 200) {
                               final tmpDir  = await getTemporaryDirectory();
-                              final tmpFile = File('${tmpDir.path}/${const Uuid().v4()}.pdf');
+                              final ext     = nombre.contains('.') ? nombre.split('.').last.toLowerCase() : 'pdf';
+                              final tmpFile = File('${tmpDir.path}/${const Uuid().v4()}.$ext');
                               await tmpFile.writeAsBytes(resp.bodyBytes);
                               if (!mounted) return;
                               Navigator.push(context, MaterialPageRoute(
