@@ -106,7 +106,7 @@ class _MisPlanificacionesLocalesScreenState
           _showCargandoOverlay(false);
           Navigator.push(context,
               MaterialPageRoute(builder: (_) =>
-                  VisorCasoScreen(caso: caso, modoGenerico: true)));
+                  VisorCasoScreen(caso: caso, modoGenerico: true, planLocal: plan)));
           return;
         }
       }
