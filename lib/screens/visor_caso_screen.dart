@@ -14,7 +14,10 @@ import 'visor_windows.dart';
 import 'planificacion_local.dart';
 import 'package:untitled/services/app_theme.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:uuid/uuid.dart';
 import 'package:untitled/widgets/audio_notas_panel.dart';
+import 'visor_pdf_screen.dart';
 
 // ── Modelos de datos ──────────────────────────────────────────────────────
 
@@ -3943,10 +3946,33 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
                           final pdfUrl = nombre.startsWith('http')
                               ? nombre
                               : docUrl + nombre;
-                          final pdfUri = Uri.parse(pdfUrl)
-                              .replace(userInfo: '$email:$password');
-                          await launchUrl(pdfUri,
-                              mode: LaunchMode.externalApplication);
+                          if (!mounted) return;
+                          showDialog(
+                            context: context,
+                            barrierDismissible: false,
+                            builder: (_) => const Center(
+                              child: CircularProgressIndicator(),
+                            ),
+                          );
+                          try {
+                            final resp = await http.get(
+                              Uri.parse(pdfUrl),
+                              headers: {'Authorization': 'Basic $credentials'},
+                            ).timeout(const Duration(seconds: 20));
+                            if (mounted) Navigator.of(context, rootNavigator: true).pop();
+                            if (!mounted) return;
+                            if (resp.statusCode != 200) return;
+                            final tmpDir  = await getTemporaryDirectory();
+                            final ext     = nombre.contains('.') ? nombre.split('.').last.toLowerCase() : 'pdf';
+                            final tmpFile = File('${tmpDir.path}/${const Uuid().v4()}.$ext');
+                            await tmpFile.writeAsBytes(resp.bodyBytes);
+                            if (!mounted) return;
+                            Navigator.push(context, MaterialPageRoute(
+                              builder: (_) => VisorPdfScreen(rutaLocal: tmpFile.path, nombre: nombre),
+                            ));
+                          } catch (_) {
+                            if (mounted) Navigator.of(context, rootNavigator: true).pop();
+                          }
                         },
                         child: Padding(
                           padding: const EdgeInsets.symmetric(

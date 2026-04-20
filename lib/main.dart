@@ -15,20 +15,22 @@ final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin = FlutterL
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await AppTheme.load();
-  try {
-    if (FirebaseService.isAvailable) {
-      await Firebase.initializeApp(
-        options: DefaultFirebaseOptions.currentPlatform,
-      );
+  if (FirebaseService.isAvailable) {
+    try {
+      await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+    } on FirebaseException catch (e) {
+      if (e.code != 'duplicate-app') rethrow;
     }
-  } catch (e) {
-    debugPrint('Firebase init error: $e');
   }
 
   await initNotificaciones();
 
   if (FirebaseService.isAvailable) {
-    await initFCM();
+    try {
+      await initFCM();
+    } catch (e) {
+      debugPrint('FCM init error: $e');
+    }
   }
 
   runApp(const MyApp());
