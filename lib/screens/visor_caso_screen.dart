@@ -435,10 +435,21 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
               if (!mounted) return;
               await _restaurarSesion(widget.sesionGuardada!);
             });
-          } else if (widget.autoCargar) {
+          } else if (widget.autoCargar && widget.planLocal != null) {
             _credencialesFuture.then((_) async {
               if (!mounted) return;
               await _autoCargarTodo();
+            });
+          } else if (widget.autoCargar && widget.planLocal == null) {
+            // Último caso desde menú: restaurar estado si existe, si no cargar todo
+            _credencialesFuture.then((_) async {
+              if (!mounted) return;
+              final prefs = await SharedPreferences.getInstance();
+              if (prefs.containsKey('estado_caso_${widget.caso.id}')) {
+                await _restaurarEstadoCaso();
+              } else {
+                await _autoCargarTodo();
+              }
             });
           } else if (!widget.modoGenerico) {
             // Caso normal: restaurar estado guardado de la última visita
@@ -2771,8 +2782,8 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
                 ),
               ),
             ),
-            // Botón Exportar (fuera, oculto en flujo IA)
-            if (!widget.autoCargar)
+            // Botón Exportar (oculto solo en modo genérico sin plan)
+            if (!widget.modoGenerico || widget.planLocal != null)
             Positioned(
               bottom: 88, right: 14,
               child: RepaintBoundary(
@@ -2809,11 +2820,13 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
               bottom: 42, right: 14,
               child: RepaintBoundary(
                 child: GestureDetector(
-                  onTap: widget.autoCargar
+                  onTap: widget.autoCargar && widget.planLocal != null
                       ? (_planGuardado ? null : _guardarEnMisPlanificaciones)
-                      : widget.sesionGuardada != null
-                          ? _actualizarSesion
-                          : _guardarSesion,
+                      : widget.autoCargar && widget.planLocal == null
+                          ? _guardarEnCaso
+                          : widget.sesionGuardada != null
+                              ? _actualizarSesion
+                              : _guardarSesion,
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(20),
                     child: BackdropFilter(
@@ -2836,21 +2849,21 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
                         ),
                         child: Row(mainAxisSize: MainAxisSize.min, children: [
                           Icon(
-                            widget.autoCargar
+                            (widget.autoCargar && widget.planLocal != null)
                                 ? (_planGuardado ? Icons.check_circle_outline : Icons.save_outlined)
-                                : Icons.bookmark_add_outlined,
+                                : Icons.save_outlined,
                             size: 14,
-                            color: widget.autoCargar
+                            color: (widget.autoCargar && widget.planLocal != null)
                                 ? const Color(0xFF8E44AD)
                                 : const Color(0xFF34A853),
                           ),
                           const SizedBox(width: 6),
                           Text(
-                            widget.autoCargar
+                            (widget.autoCargar && widget.planLocal != null)
                                 ? (_planGuardado ? 'Guardado' : 'Guardar')
                                 : (widget.sesionGuardada != null ? 'Actualizar' : 'Guardar'),
                             style: TextStyle(
-                              color: widget.autoCargar
+                              color: (widget.autoCargar && widget.planLocal != null)
                                   ? const Color(0xFF8E44AD)
                                   : const Color(0xFF34A853),
                               fontSize: 12, fontWeight: FontWeight.w700,
@@ -3566,6 +3579,39 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
       content: Text('«$nombreConfirmado» guardado en Listados'),
       backgroundColor: const Color(0xFF34A853),
       duration: const Duration(seconds: 2),
+    ));
+  }
+
+  /// Guarda el estado actual del visor en el caso del servidor (sin dialog).
+  Future<void> _guardarEnCaso() async {
+    final capasVisibles = <Map<String, dynamic>>[];
+    for (final entry in _visibles.entries) {
+      if (entry.value && entry.key < widget.caso.todosGlb.length) {
+        final glb = widget.caso.todosGlb[entry.key];
+        capasVisibles.add({
+          'indice': entry.key, 'nombre': glb.nombre,
+          'archivo': glb.archivo, 'tipo': glb.tipo, 'url': glb.url,
+        });
+      }
+    }
+    final tornillos = _tornillosColocados.map((t) => {
+      'instanceId': t.instanceId, 'glbId': t.glbId, 'nombre': t.nombre,
+      'cilindroId': t.cilindroId, 'largo_mm': t.largo,
+      'hx': t.hx, 'hy': t.hy, 'hz': t.hz,
+      'hnx': t.hnx, 'hny': t.hny, 'hnz': t.hnz,
+      'hdx': t.hdx, 'hdy': t.hdy, 'hdz': t.hdz,
+      'usarTrayectoria': t.usarTrayectoria,
+    }).toList();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('estado_caso_${widget.caso.id}', json.encode({
+      'capas_visibles': capasVisibles,
+      'tornillos_sesion_actual': tornillos,
+    }));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+      content: Text('Caso guardado'),
+      backgroundColor: Color(0xFF34A853),
+      duration: Duration(seconds: 2),
     ));
   }
 
