@@ -74,9 +74,21 @@ Future<void> initFCM() async {
 
   final FirebaseMessaging messaging = FirebaseMessaging.instance;
 
-  await messaging.requestPermission();
+  try {
+    await messaging.requestPermission()
+        .timeout(const Duration(seconds: 5));
+  } catch (e) {
+    debugPrint('FCM requestPermission error: $e');
+    return; // sin Google Play Services no tiene sentido continuar
+  }
 
-  final String? token = await messaging.getToken();
+  String? token;
+  try {
+    token = await messaging.getToken()
+        .timeout(const Duration(seconds: 8));
+  } catch (e) {
+    debugPrint('FCM getToken error: $e');
+  }
   debugPrint('FCM TOKEN: $token');
 
   if (!Platform.isAndroid && !Platform.isIOS) return;
