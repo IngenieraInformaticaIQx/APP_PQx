@@ -3803,32 +3803,25 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
     _jsRun('window.visor.setVista(0);');
 
     try {
-      final email    = prefs.getString('login_email')    ?? '';
-      final password = prefs.getString('login_password') ?? '';
-      final credentials = base64Encode(utf8.encode('$email:$password'));
-
       final request = http.MultipartRequest('POST', Uri.parse(_exportarUrl))
-        ..headers['Authorization'] = 'Basic $credentials'
         ..fields['datos'] = jsonStr;
 
       if (frontal  != null) request.files.add(http.MultipartFile.fromBytes('frontal',   frontal,  filename: 'frontal.png',    contentType: MediaType('image', 'png')));
       if (lateralD != null) request.files.add(http.MultipartFile.fromBytes('lateral_d', lateralD, filename: 'lateral_d.png', contentType: MediaType('image', 'png')));
       if (lateralI != null) request.files.add(http.MultipartFile.fromBytes('lateral_i', lateralI, filename: 'lateral_i.png', contentType: MediaType('image', 'png')));
 
-      final resp = await request.send();
+      final resp = await request.send().timeout(const Duration(seconds: 30));
+      final ok = resp.statusCode >= 200 && resp.statusCode < 300;
       if (mounted) {
         ScaffoldMessenger.of(context).clearSnackBars();
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(resp.statusCode == 200
+          content: Text(ok
               ? 'Exportado correctamente'
-              : 'Error al exportar (\${resp.statusCode})'),
-          backgroundColor: resp.statusCode == 200 ? const Color(0xFF34A853) : Colors.redAccent,
+              : 'Error al exportar (${resp.statusCode})'),
+          backgroundColor: ok ? const Color(0xFF34A853) : Colors.redAccent,
           duration: const Duration(seconds: 3),
         ));
-        // Si el envío fue correcto, cambiar estado a 'enviado'
-        if (resp.statusCode == 200) {
-          _cambiarEstadoAEnviado(prefs);
-        }
+        if (ok) _cambiarEstadoAEnviado(prefs);
       }
     } catch (e) {
       if (mounted) {
