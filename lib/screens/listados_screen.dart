@@ -7,6 +7,7 @@ import 'dart:ui';
 import 'dart:math' as math;
 import 'visor_caso_screen.dart';
 import 'package:untitled/services/app_theme.dart';
+import 'package:untitled/services/audio_notas_service.dart';
 
 class ListadosScreen extends StatefulWidget {
   const ListadosScreen({super.key});
@@ -455,6 +456,7 @@ class _DetalleScreenState extends State<_DetalleScreen>
   late Animation<double>  _headerFade;
   late Animation<Offset>  _headerSlide;
   bool _exportando = false;
+  int  _numNotasVoz = 0;
 
   static const Color _accent  = Color(0xFFE8840A);
   static const Color _accentL = Color(0xFFFFB74D);
@@ -475,6 +477,12 @@ class _DetalleScreenState extends State<_DetalleScreen>
     _headerSlide = Tween<Offset>(begin: const Offset(0, -0.4), end: Offset.zero)
         .animate(CurvedAnimation(parent: _headerController, curve: Curves.easeOutCubic));
     _headerController.forward();
+    final audioId = widget.sesion['audio_notas_id'] as String?;
+    if (audioId != null) {
+      AudioNotasService.cargar(audioId).then((notas) {
+        if (mounted) setState(() => _numNotasVoz = notas.length);
+      });
+    }
   }
 
   @override
@@ -665,6 +673,8 @@ class _DetalleScreenState extends State<_DetalleScreen>
                       _infoRow(Icons.folder_outlined, 'Visor origen', casoOrigen),
                     _infoRow(Icons.layers_outlined, 'Capas visibles', '${capas.length}'),
                     _infoRow(Icons.construction_outlined, 'Tornillos colocados', '${tornillos.length}'),
+                    _infoRow(Icons.mic_rounded, 'Notas de voz',
+                        _numNotasVoz > 0 ? '$_numNotasVoz nota${_numNotasVoz == 1 ? '' : 's'}' : '0'),
                     if (historial.isNotEmpty)
                       _infoRow(Icons.history, 'Sesiones anteriores', '${historial.length}'),
                   ]),
