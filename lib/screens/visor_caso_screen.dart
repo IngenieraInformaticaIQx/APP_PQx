@@ -268,7 +268,8 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
 
   late Map<int, bool> _visibles;
   bool _panelAbierto = true;
-  double _panelTopOffset = 74.0; // posición Y arrastrable del panel lateral
+  double _panelTopOffset = 74.0;
+  double _panelLeftOffset = -1.0; // sentinel: se inicializa al primer build con el ancho real
   bool _autoRotate   = false;
   bool _visorListo   = false;
   final _visorWindowsKey = GlobalKey<VisorWindowsState>();
@@ -4166,16 +4167,25 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
 
   // ── Panel lateral ─────────────────────────────────────────────────────────
   Widget _buildPanelLateral() {
+    final size    = MediaQuery.of(context).size;
+    final padding = MediaQuery.of(context).padding;
+    if (_panelLeftOffset < 0) _panelLeftOffset = size.width - 260 - 12;
+
     return AnimatedPositioned(
       duration: const Duration(milliseconds: 300),
       curve: Curves.easeInOut,
-      top: _panelTopOffset, right: _panelAbierto ? 12 : -275,
+      top: _panelTopOffset,
+      left: _panelAbierto ? _panelLeftOffset : size.width + 20,
       child: GestureDetector(
-        onVerticalDragUpdate: (d) {
+        onPanUpdate: (d) {
           setState(() {
             _panelTopOffset = (_panelTopOffset + d.delta.dy).clamp(
-              MediaQuery.of(context).padding.top + 8.0,
-              MediaQuery.of(context).size.height - 200.0,
+              padding.top + 8.0,
+              size.height - 200.0,
+            );
+            _panelLeftOffset = (_panelLeftOffset + d.delta.dx).clamp(
+              8.0,
+              size.width - 260 - 8.0,
             );
           });
         },
