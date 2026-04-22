@@ -2,6 +2,7 @@ import 'dart:ui';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:untitled/services/app_theme.dart';
+import 'package:untitled/services/audio_notas_service.dart';
 import 'visor_caso_screen.dart';
 import 'archivos_caso_screen.dart';
 
@@ -36,12 +37,17 @@ class _DetalleCasoScreenState extends State<DetalleCasoScreen>
 
   static const _accent = Color(0xFF2A7FF5);
 
+  int _numNotasVoz = 0;
+
   void _onThemeChanged() { if (mounted) setState(() {}); }
 
   @override
   void initState() {
     super.initState();
     AppTheme.isDark.addListener(_onThemeChanged);
+    AudioNotasService.cargar(widget.caso.id).then((notas) {
+      if (mounted) setState(() => _numNotasVoz = notas.length);
+    });
 
     _bgCtrl = AnimationController(duration: const Duration(seconds: 60), vsync: this)..repeat();
     _shimmerCtrl = AnimationController(duration: const Duration(milliseconds: 8200), vsync: this)..repeat();
@@ -196,7 +202,9 @@ class _DetalleCasoScreenState extends State<DetalleCasoScreen>
                     size: size,
                     badge: 'VISOR 3D',
                     titulo: 'Visor 3D',
-                    subtitulo: 'Modelos · Placas · Tornillos',
+                    subtitulo: _numNotasVoz > 0
+                        ? 'Modelos · Placas · Tornillos\n🎙 $_numNotasVoz nota${_numNotasVoz == 1 ? '' : 's'} de voz'
+                        : 'Modelos · Placas · Tornillos',
                     accentColor: _accent,
                     accentColorLight: const Color(0xFF5BA8FF),
                     icon: Icons.view_in_ar_rounded,

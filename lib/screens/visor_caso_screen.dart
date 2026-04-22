@@ -17,6 +17,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
 import 'package:untitled/widgets/audio_notas_panel.dart';
+import 'package:untitled/services/audio_notas_service.dart';
 import 'visor_pdf_screen.dart';
 
 // ── Modelos de datos ──────────────────────────────────────────────────────
@@ -324,6 +325,17 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
   // Vistas rápidas
   bool _vistasPanelVisible = false;
 
+  // ID para notas de voz de sesiones genéricas.
+  // Se inicializa desde sesionGuardada si existe, o se genera nuevo.
+  late String _sessionAudioId;
+  bool _sesionAudioGuardada = false; // true cuando el usuario guarda la sesión
+
+  String get _audioNotasId {
+    if (widget.planLocal != null) return widget.planLocal!.id;
+    if (!widget.modoGenerico) return widget.caso.id;
+    return _sessionAudioId;
+  }
+
   // Regla libre / mediciones
   bool   _modoRegla       = false;
   double? _reglaLibreMm;
@@ -350,6 +362,9 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
     super.initState();
     AppTheme.isDark.addListener(_onThemeChanged);
     _estadoActual = widget.caso.estado;
+    // Notas de voz: recuperar ID de sesión guardada, o generar nuevo
+    _sessionAudioId = (widget.sesionGuardada?['audio_notas_id'] as String?)
+        ?? const Uuid().v4();
     // Al abrir un caso pendiente lo marcamos como validado automáticamente
     if (!widget.modoGenerico && _estadoActual == 'pendiente') {
       WidgetsBinding.instance.addPostFrameCallback((_) => _autoAvanzarEstado('validado'));
@@ -585,13 +600,17 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
   @override
   void dispose() {
     AppTheme.isDark.removeListener(_onThemeChanged);
-    // Guardar qué capas estaban visibles al salir
     _guardarVisiblesAlSalir();
     for (final n in _cargandoNotifiers.values) n.dispose();
     for (final n in _catCargando.values) n.dispose();
     _colocadosVersion.dispose();
     _notasVersion.dispose();
     _catCacheVersion.dispose();
+    // Borrar notas de sesión genérica solo si el usuario NO guardó la sesión
+    if (widget.planLocal == null && widget.modoGenerico && !_sesionAudioGuardada
+        && widget.sesionGuardada == null) {
+      AudioNotasService.eliminarSesion(_sessionAudioId);
+    }
     super.dispose();
   }
 
@@ -3526,6 +3545,7 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
       'num_capas': capasVisibles.length,
       'capas_visibles': capasVisibles,
       'tornillos_sesion_actual': sesionActual,
+      'audio_notas_id': _sessionAudioId,
       'caso': {
         'id':       widget.caso.id,
         'nombre':   widget.caso.nombre,
@@ -3534,6 +3554,7 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
         'estado':   widget.caso.estado,
       },
     };
+    _sesionAudioGuardada = true;
 
     final listaRaw = prefs.getString('listados_sesiones') ?? '[]';
     final List<dynamic> lista = json.decode(listaRaw);
@@ -4031,7 +4052,7 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
       builder: (_) => Dialog(
         backgroundColor: Colors.transparent,
         insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
-        child: AudioNotasPanel(casoId: widget.planLocal?.id ?? widget.caso.id),
+        child: AudioNotasPanel(casoId: _audioNotasId),
       ),
     );
   }

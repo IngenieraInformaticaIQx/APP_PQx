@@ -24,7 +24,7 @@ class _AudioNotasPanelState extends State<AudioNotasPanel> {
   String? _reproduciendo;   // id de la nota en reproducción
   int    _segGrabando     = 0;
   Timer? _timerGrabacion;
-  String? _rutaActual;
+  String? _idActual;        // UUID para el archivo y la nota (mismo)
 
   @override
   void initState() {
@@ -53,15 +53,15 @@ class _AudioNotasPanelState extends State<AudioNotasPanel> {
       final hasPermission = await _recorder.hasPermission();
       if (!hasPermission) {
         if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Permiso de micrófono denegado'),
+          content: Text('Se necesita permiso de micrófono para grabar notas de voz.'),
           backgroundColor: Colors.redAccent,
           duration: Duration(seconds: 3),
         ));
         return;
       }
-      final id   = const Uuid().v4();
+      final id  = const Uuid().v4();
+      _idActual = id;
       final ruta = await AudioNotasService.nuevaRuta(widget.casoId, id);
-      _rutaActual = ruta;
       await _recorder.start(RecordConfig(encoder: AudioEncoder.aacLc), path: ruta);
       setState(() { _grabando = true; _segGrabando = 0; });
       _timerGrabacion = Timer.periodic(const Duration(seconds: 1), (_) {
@@ -79,18 +79,20 @@ class _AudioNotasPanelState extends State<AudioNotasPanel> {
 
   Future<void> _pararGrabacion() async {
     _timerGrabacion?.cancel();
-    await _recorder.stop();
+    final ruta = await _recorder.stop();
     final duracion = _segGrabando;
-    final ruta     = _rutaActual!;
     setState(() { _grabando = false; _segGrabando = 0; });
 
+    if (ruta == null || ruta.isEmpty || _idActual == null) return;
+
     final nota = AudioNota(
-      id:                const Uuid().v4(),
+      id:                _idActual!,
       casoId:            widget.casoId,
       path:              ruta,
       fecha:             DateTime.now(),
       duracionSegundos:  duracion,
     );
+    _idActual = null;
     await AudioNotasService.guardar(nota);
     await _cargar();
   }
@@ -101,8 +103,15 @@ class _AudioNotasPanelState extends State<AudioNotasPanel> {
       setState(() => _reproduciendo = null);
     } else {
       await _player.stop();
-      await _player.play(DeviceFileSource(nota.path));
-      setState(() => _reproduciendo = nota.id);
+      try {
+        await _player.play(DeviceFileSource(nota.path));
+        setState(() => _reproduciendo = nota.id);
+      } catch (_) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('No se pudo reproducir la nota de voz.')));
+        }
+      }
     }
   }
 

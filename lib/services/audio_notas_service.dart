@@ -79,4 +79,14 @@ class AudioNotasService {
     final file = File(nota.path);
     if (file.existsSync()) file.deleteSync();
   }
+
+  static Future<void> eliminarSesion(String casoId) async {
+    final prefs = await SharedPreferences.getInstance();
+    final notas = await cargar(casoId);
+    for (final nota in notas) {
+      final file = File(nota.path);
+      if (file.existsSync()) file.deleteSync();
+    }
+    await prefs.remove('${_prefsKey}_$casoId');
+  }
 }
