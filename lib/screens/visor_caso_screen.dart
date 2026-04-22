@@ -273,6 +273,8 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
   double _panelLeftOffset = -1.0; // sentinel: se inicializa al primer build con el ancho real
   bool _panelArrastrando = false;
   Offset _panelDragLastPos = Offset.zero;
+
+  double _panelHeight = 680.0;
   bool _autoRotate   = false;
   bool _visorListo   = false;
   final _visorWindowsKey = GlobalKey<VisorWindowsState>();
@@ -369,10 +371,7 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
     // Notas de voz: recuperar ID de sesión guardada, o generar nuevo
     _sessionAudioId = (widget.sesionGuardada?['audio_notas_id'] as String?)
         ?? const Uuid().v4();
-    // Al abrir un caso pendiente lo marcamos como validado automáticamente
-    if (!widget.modoGenerico && _estadoActual == 'pendiente') {
-      WidgetsBinding.instance.addPostFrameCallback((_) => _autoAvanzarEstado('validado'));
-    }
+    // Estado inicial: no se auto-avanza al abrir
     // DEBUG acceso rápido
     if (widget.autoCargar) {
       debugPrint('=== AUTO_CARGAR DEBUG ===');
@@ -2056,6 +2055,7 @@ function setPlanoCorte(activo, eje, posNorm){
       }
     });
     renderer.localClippingEnabled = false;
+    needsRender = true;
     return;
   }
 
@@ -2085,6 +2085,7 @@ function setPlanoCorte(activo, eje, posNorm){
       c.material.needsUpdate    = true;
     }
   });
+  needsRender = true;
 }
 
 // Activar/desactivar plano en un GLB concreto
@@ -2096,6 +2097,7 @@ function setPlanoGlb(id, activo){
       c.material.needsUpdate = true;
     }
   });
+  needsRender = true;
 }
 
 // ── Regla libre ──────────────────────────────────────────────────────────
@@ -2786,8 +2788,8 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
                 ),
               ),
             ),
-            // Botón Exportar (oculto solo en modo genérico sin plan)
-            if (!widget.modoGenerico || widget.planLocal != null)
+            // Botón Exportar (visible siempre excepto modoGenérico sin plan ni sesión)
+            if (!widget.modoGenerico || widget.planLocal != null || widget.sesionGuardada != null)
             Positioned(
               bottom: 88, right: 14,
               child: RepaintBoundary(
@@ -3861,6 +3863,8 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
       ).timeout(const Duration(seconds: 10));
       if (!mounted) return;
       setState(() => _estadoActual = nuevo);
+      final fechaHoy = DateTime.now().toIso8601String();
+      await prefs.setString('estado_fecha_${widget.caso.id}', fechaHoy);
       final ultimoId = prefs.getString('ultimo_caso_id');
       if (ultimoId == widget.caso.id) await prefs.setString('ultimo_caso_estado', nuevo);
       widget.onEstadoCambiado?.call(nuevo);
@@ -3885,7 +3889,8 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
         body: json.encode({'id': widget.caso.id, 'estado': 'enviado'}),
       ).timeout(const Duration(seconds: 10));
 
-      // Actualizar SharedPreferences si era el último caso visitado
+      final fechaHoy = DateTime.now().toIso8601String();
+      await prefs.setString('estado_fecha_${widget.caso.id}', fechaHoy);
       final ultimoId = prefs.getString('ultimo_caso_id');
       if (ultimoId == widget.caso.id) {
         await prefs.setString('ultimo_caso_estado', 'enviado');
@@ -4187,9 +4192,6 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
     final padding = MediaQuery.of(context).padding;
     if (_panelLeftOffset < 0) _panelLeftOffset = size.width - 260 - 12;
 
-    // Altura fija: no depende de la posición, el panel no crece ni encoge al mover
-    final panelMaxH = (size.height * 0.62).clamp(320.0, 540.0);
-
     return AnimatedPositioned(
       duration: _panelArrastrando
           ? Duration.zero          // sin animación mientras arrastramos
@@ -4225,6 +4227,14 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
           setState(() => _panelArrastrando = false);
         },
         onLongPressCancel: () => setState(() => _panelArrastrando = false),
+        onDoubleTap: () {
+          HapticFeedback.lightImpact();
+          setState(() {
+            _panelTopOffset  = 74.0;
+            _panelLeftOffset = size.width - 260 - 12;
+            _panelHeight     = 680.0;
+          });
+        },
         behavior: HitTestBehavior.opaque,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 150),
@@ -4234,52 +4244,79 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
               ? [BoxShadow(color: const Color(0xFF2A7FF5).withOpacity(0.35), blurRadius: 32, offset: const Offset(0, 8))]
               : [BoxShadow(color: const Color(0xFF2A7FF5).withOpacity(0.10), blurRadius: 24, offset: const Offset(0, 8))],
         ),
-        child: ClipRRect(
-        borderRadius: BorderRadius.circular(20),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
-          child: Container(
-            width: 260,
-            constraints: BoxConstraints(maxHeight: panelMaxH),
-            decoration: BoxDecoration(
-              color: AppTheme.cardBg1,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ClipRRect(
               borderRadius: BorderRadius.circular(20),
-              border: Border.all(
-                color: _panelArrastrando
-                    ? const Color(0xFF2A7FF5).withOpacity(0.6)
-                    : AppTheme.cardBorder,
-                width: 1.5,
+              child: BackdropFilter(
+                filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+                child: Container(
+                  width: 260,
+                  height: _panelHeight,
+                  decoration: BoxDecoration(
+                    color: AppTheme.cardBg1,
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
+                      color: _panelArrastrando
+                          ? const Color(0xFF2A7FF5).withOpacity(0.6)
+                          : AppTheme.cardBorder,
+                      width: 1.5,
+                    ),
+                  ),
+                  child: Column(children: [
+                    _buildTabs(),
+                    Divider(height: 1, color: AppTheme.handleColor),
+                    Expanded(
+                      child: AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 180),
+                        transitionBuilder: (child, anim) => FadeTransition(opacity: anim, child: child),
+                        layoutBuilder: (currentChild, previousChildren) => Stack(
+                          alignment: Alignment.topCenter,
+                          children: [...previousChildren, if (currentChild != null) currentChild],
+                        ),
+                        child: SingleChildScrollView(
+                          key: ValueKey(_tabPanel),
+                          padding: const EdgeInsets.only(bottom: 8),
+                          physics: const BouncingScrollPhysics(),
+                          child: _tabPanel == 'capas'
+                              ? _buildContenidoCapas()
+                              : _tabPanel == 'tornillos'
+                                  ? _buildContenidoColocados()
+                                  : _tabPanel == 'notas'
+                                      ? _buildContenidoNotas()
+                                      : _buildContenidoMediciones(),
+                        ),
+                      ),
+                    ),
+                  ]),
+                ),
               ),
             ),
-            child: Column(children: [
-              _buildTabs(),
-              Divider(height: 1, color: AppTheme.handleColor),
-              Expanded(
-                child: AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 180),
-                  transitionBuilder: (child, anim) => FadeTransition(opacity: anim, child: child),
-                  layoutBuilder: (currentChild, previousChildren) => Stack(
-                    alignment: Alignment.topCenter,
-                    children: [...previousChildren, if (currentChild != null) currentChild],
-                  ),
-                  child: SingleChildScrollView(
-                    key: ValueKey(_tabPanel),
-                    padding: const EdgeInsets.only(bottom: 24),
-                    physics: const BouncingScrollPhysics(),
-                    child: _tabPanel == 'capas'
-                        ? _buildContenidoCapas()
-                        : _tabPanel == 'tornillos'
-                            ? _buildContenidoColocados()
-                            : _tabPanel == 'notas'
-                                ? _buildContenidoNotas()
-                                : _buildContenidoMediciones(),
+            // ── Handle de redimensionado ──────────────────────────────
+            GestureDetector(
+              onVerticalDragUpdate: (d) {
+                setState(() {
+                  _panelHeight = (_panelHeight + d.delta.dy).clamp(160.0, size.height - _panelTopOffset - 80.0);
+                });
+              },
+              child: Container(
+                width: 260,
+                height: 20,
+                color: Colors.transparent,
+                child: Center(
+                  child: Container(
+                    width: 36, height: 4,
+                    decoration: BoxDecoration(
+                      color: AppTheme.handleColor,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
                   ),
                 ),
               ),
-            ]),
-          ),
+            ),
+          ],
         ),
-      ),
       ),
       ),
     );
