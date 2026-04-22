@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:http/http.dart' as http;
@@ -270,6 +271,8 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
   bool _panelAbierto = true;
   double _panelTopOffset = 74.0;
   double _panelLeftOffset = -1.0; // sentinel: se inicializa al primer build con el ancho real
+  bool _panelArrastrando = false;
+  Offset _panelDragLastPos = Offset.zero;
   bool _autoRotate   = false;
   bool _visorListo   = false;
   final _visorWindowsKey = GlobalKey<VisorWindowsState>();
@@ -4171,40 +4174,69 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
     final padding = MediaQuery.of(context).padding;
     if (_panelLeftOffset < 0) _panelLeftOffset = size.width - 260 - 12;
 
+    // Altura fija: no depende de la posición, el panel no crece ni encoge al mover
+    final panelMaxH = (size.height * 0.62).clamp(320.0, 540.0);
+
     return AnimatedPositioned(
-      duration: const Duration(milliseconds: 300),
+      duration: _panelArrastrando
+          ? Duration.zero          // sin animación mientras arrastramos
+          : const Duration(milliseconds: 300),
       curve: Curves.easeInOut,
       top: _panelTopOffset,
       left: _panelAbierto ? _panelLeftOffset : size.width + 20,
       child: GestureDetector(
-        onPanUpdate: (d) {
+        onLongPressStart: (d) {
+          HapticFeedback.mediumImpact();
           setState(() {
-            _panelTopOffset = (_panelTopOffset + d.delta.dy).clamp(
+            _panelArrastrando = true;
+            _panelDragLastPos = d.globalPosition;
+          });
+        },
+        onLongPressMoveUpdate: (d) {
+          if (!_panelArrastrando) return;
+          final delta = d.globalPosition - _panelDragLastPos;
+          setState(() {
+            _panelDragLastPos = d.globalPosition;
+            _panelTopOffset = (_panelTopOffset + delta.dy).clamp(
               padding.top + 8.0,
-              size.height - 200.0,
+              size.height - 160.0,
             );
-            _panelLeftOffset = (_panelLeftOffset + d.delta.dx).clamp(
+            _panelLeftOffset = (_panelLeftOffset + delta.dx).clamp(
               8.0,
               size.width - 260 - 8.0,
             );
           });
         },
+        onLongPressEnd: (_) {
+          HapticFeedback.lightImpact();
+          setState(() => _panelArrastrando = false);
+        },
+        onLongPressCancel: () => setState(() => _panelArrastrando = false),
         behavior: HitTestBehavior.opaque,
-      child: ClipRRect(
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: _panelArrastrando
+              ? [BoxShadow(color: const Color(0xFF2A7FF5).withOpacity(0.35), blurRadius: 32, offset: const Offset(0, 8))]
+              : [BoxShadow(color: const Color(0xFF2A7FF5).withOpacity(0.10), blurRadius: 24, offset: const Offset(0, 8))],
+        ),
+        child: ClipRRect(
         borderRadius: BorderRadius.circular(20),
         child: BackdropFilter(
           filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
           child: Container(
             width: 260,
-            constraints: BoxConstraints(
-              // Se recalcula dinámicamente según la posición arrastrada
-              maxHeight: MediaQuery.of(context).size.height - _panelTopOffset - 140,
-            ),
+            constraints: BoxConstraints(maxHeight: panelMaxH),
             decoration: BoxDecoration(
               color: AppTheme.cardBg1,
               borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: AppTheme.cardBorder, width: 1.5),
-              boxShadow: [BoxShadow(color: Color(0xFF2A7FF5).withOpacity(0.10), blurRadius: 24, offset: const Offset(0, 8))],
+              border: Border.all(
+                color: _panelArrastrando
+                    ? const Color(0xFF2A7FF5).withOpacity(0.6)
+                    : AppTheme.cardBorder,
+                width: 1.5,
+              ),
             ),
             child: Column(children: [
               _buildTabs(),
@@ -4234,6 +4266,7 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
             ]),
           ),
         ),
+      ),
       ),
       ),
     );
