@@ -208,7 +208,7 @@ class _DetalleCasoScreenState extends State<DetalleCasoScreen>
                     accentColor: _accent,
                     accentColorLight: const Color(0xFF5BA8FF),
                     icon: Icons.view_in_ar_rounded,
-                    imagenUrl: null,
+                    imagenAsset: 'assets/images/tobillo_3d.png',
                     onTap: () => Navigator.push(
                       context,
                       MaterialPageRoute(
@@ -240,7 +240,7 @@ class _DetalleCasoScreenState extends State<DetalleCasoScreen>
                     accentColor: const Color(0xFF8E44AD),
                     accentColorLight: const Color(0xFFBE90D4),
                     icon: Icons.folder_open_rounded,
-                    imagenUrl: null,
+                    imagenAsset: 'assets/images/carpeta.png',
                     onTap: () => Navigator.push(
                       context,
                       MaterialPageRoute(
@@ -269,7 +269,7 @@ class _DetalleCasoScreenState extends State<DetalleCasoScreen>
     required Color    accentColorLight,
     required IconData icon,
     required VoidCallback onTap,
-    String?  imagenUrl,
+    String?  imagenAsset,
   }) {
     return GestureDetector(
       onTap: onTap,
@@ -307,55 +307,56 @@ class _DetalleCasoScreenState extends State<DetalleCasoScreen>
             ),
             child: Stack(children: [
 
-              // Imagen de fondo (opcional) con overlay
-              if (imagenUrl != null)
-                Positioned.fill(
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(28),
-                    child: Stack(children: [
-                      Image.network(
-                        imagenUrl,
-                        fit: BoxFit.cover,
-                        width: double.infinity,
-                        height: double.infinity,
-                        errorBuilder: (_, __, ___) => const SizedBox.shrink(),
-                      ),
-                      Container(
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(28),
-                          gradient: LinearGradient(
-                            colors: [
-                              accentColor.withOpacity(0.55),
-                              Colors.black.withOpacity(0.45),
-                            ],
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                          ),
-                        ),
-                      ),
-                    ]),
-                  ),
+              // Grid de puntos
+              Positioned.fill(
+                child: CustomPaint(
+                  painter: _DotGridPainter(color: accentColor.withOpacity(0.06)),
                 ),
-
-              // Grid de puntos (solo si no hay imagen)
-              if (imagenUrl == null)
-                Positioned.fill(
-                  child: CustomPaint(
-                    painter: _DotGridPainter(color: accentColor.withOpacity(0.06)),
-                  ),
-                ),
+              ),
 
               // Círculos decorativos
               Positioned(right: -35, top: -35,
                 child: Container(width: 200, height: 200,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    color: accentColor.withOpacity(imagenUrl != null ? 0.0 : 0.07)))),
+                    color: accentColor.withOpacity(0.07)))),
               Positioned(right: 25, bottom: -55,
                 child: Container(width: 155, height: 155,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    color: accentColor.withOpacity(imagenUrl != null ? 0.0 : 0.05)))),
+                    color: accentColor.withOpacity(0.05)))),
+
+              // Imagen asset con fade ShaderMask lateral (igual que menu_screen)
+              if (imagenAsset != null)
+                Positioned(
+                  right: 0, top: 0, bottom: 0,
+                  width: 140,
+                  child: ClipRRect(
+                    borderRadius: const BorderRadius.only(
+                      topRight: Radius.circular(28),
+                      bottomRight: Radius.circular(28),
+                    ),
+                    child: ShaderMask(
+                      shaderCallback: (rect) => const LinearGradient(
+                        begin: Alignment.centerLeft,
+                        end: Alignment.centerRight,
+                        colors: [
+                          Colors.transparent,
+                          Color(0x80FFFFFF),
+                          Color(0xB8FFFFFF),
+                        ],
+                        stops: [0.0, 0.40, 1.0],
+                      ).createShader(rect),
+                      blendMode: BlendMode.dstIn,
+                      child: Image.asset(
+                        imagenAsset,
+                        fit: BoxFit.cover,
+                        color: Colors.white.withOpacity(0.88),
+                        colorBlendMode: BlendMode.modulate,
+                      ),
+                    ),
+                  ),
+                ),
 
               // Shimmer sweep — solo esto se anima
               Positioned.fill(
@@ -413,7 +414,7 @@ class _DetalleCasoScreenState extends State<DetalleCasoScreen>
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                         decoration: BoxDecoration(
-                          color: accentColor.withOpacity(imagenUrl != null ? 0.25 : 0.12),
+                          color: accentColor.withOpacity(0.12),
                           borderRadius: BorderRadius.circular(20),
                           border: Border.all(color: accentColor.withOpacity(0.28)),
                         ),
@@ -421,7 +422,7 @@ class _DetalleCasoScreenState extends State<DetalleCasoScreen>
                           Container(
                             width: 6, height: 6,
                             decoration: BoxDecoration(
-                              color: imagenUrl != null ? Colors.white : accentColor,
+                              color: accentColor,
                               shape: BoxShape.circle,
                               boxShadow: [BoxShadow(
                                 color: accentColor.withOpacity(0.6),
@@ -432,7 +433,7 @@ class _DetalleCasoScreenState extends State<DetalleCasoScreen>
                           const SizedBox(width: 5),
                           Text(badge,
                               style: TextStyle(
-                                  color: imagenUrl != null ? Colors.white : accentColor,
+                                  color: accentColor,
                                   fontSize: 9,
                                   fontWeight: FontWeight.w800,
                                   letterSpacing: 1.5)),
@@ -452,15 +453,11 @@ class _DetalleCasoScreenState extends State<DetalleCasoScreen>
                               Row(children: [
                                 Icon(icon,
                                     size: 13,
-                                    color: imagenUrl != null
-                                        ? Colors.white70
-                                        : accentColor.withOpacity(0.65)),
+                                    color: accentColor.withOpacity(0.65)),
                                 const SizedBox(width: 4),
                                 Text(titulo.toUpperCase(),
                                     style: TextStyle(
-                                        color: imagenUrl != null
-                                            ? Colors.white70
-                                            : accentColor.withOpacity(0.65),
+                                        color: accentColor.withOpacity(0.65),
                                         fontSize: 10,
                                         fontWeight: FontWeight.w700,
                                         letterSpacing: 2.5)),
@@ -468,7 +465,7 @@ class _DetalleCasoScreenState extends State<DetalleCasoScreen>
                               const SizedBox(height: 3),
                               Text(titulo,
                                   style: TextStyle(
-                                      color: imagenUrl != null ? Colors.white : AppTheme.darkText,
+                                      color: AppTheme.darkText,
                                       fontSize: 22,
                                       fontWeight: FontWeight.w800,
                                       letterSpacing: -0.5,
@@ -476,9 +473,7 @@ class _DetalleCasoScreenState extends State<DetalleCasoScreen>
                               const SizedBox(height: 7),
                               Text(subtitulo,
                                   style: TextStyle(
-                                      color: imagenUrl != null
-                                          ? Colors.white60
-                                          : AppTheme.subtitleColor,
+                                      color: AppTheme.subtitleColor,
                                       fontSize: 11.5,
                                       height: 1.4)),
                             ],

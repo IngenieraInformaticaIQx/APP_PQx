@@ -25,6 +25,7 @@ class _CasosScreenState extends State<CasosScreen>
   bool _loading = true;
   String? _error;
   String _uid = '';
+  final Map<String, String> _fechasEstado = {}; // casoId → ISO8601
 
   // ── Animaciones (igual que VisorSelectorScreen) ───────────────────────────
   late AnimationController _bgController;
@@ -43,6 +44,14 @@ class _CasosScreenState extends State<CasosScreen>
 
   static const String _apiUrl =
       'https://profesional.planificacionquirurgica.com/listar_casos.php';
+
+  // ── Imágenes de asset por caso ─────────────────────────────────────────────
+  // Añade aquí el ID del caso y la ruta del asset que quieres mostrar en la card.
+  // Ejemplo: 'id_del_caso': 'assets/images/tobillo.jpg'
+  static const Map<String, String> _imagenesCasos = {
+     'CASO_001': 'assets/images/tobillo.jpg',
+    // 'CASO_002': 'assets/images/tornillo.jpeg',
+  };
 
   void _onThemeChanged() { if (mounted) setState(() {}); }
 
@@ -128,8 +137,17 @@ class _CasosScreenState extends State<CasosScreen>
             _cardControllers.add(ctrl);
           }
 
+          // Cargar fechas de estado guardadas localmente
+          final Map<String, String> fechas = {};
+          for (final c in casos) {
+            final f = prefs.getString('estado_fecha_${c.id}');
+            if (f != null) fechas[c.id] = f;
+          }
+
           setState(() {
             _casos = casos;
+            _fechasEstado.clear();
+            _fechasEstado.addAll(fechas);
             _loading = false;
           });
 
@@ -415,6 +433,7 @@ class _CasosScreenState extends State<CasosScreen>
                         placas:     caso.placas,
                         tornillos:  caso.tornillos,
                       );
+                      _fechasEstado[caso.id] = DateTime.now().toIso8601String();
                     }
                   });
                 },
@@ -483,6 +502,38 @@ class _CasosScreenState extends State<CasosScreen>
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
                         color: accentColor.withOpacity(0.05)))),
+
+                  // Imagen de asset con fade ShaderMask (igual que menu_screen)
+                  if (_imagenesCasos.containsKey(caso.id))
+                    Positioned(
+                      right: 0, top: 0, bottom: 0,
+                      width: 140,
+                      child: ClipRRect(
+                        borderRadius: const BorderRadius.only(
+                          topRight: Radius.circular(28),
+                          bottomRight: Radius.circular(28),
+                        ),
+                        child: ShaderMask(
+                          shaderCallback: (rect) => const LinearGradient(
+                            begin: Alignment.centerLeft,
+                            end: Alignment.centerRight,
+                            colors: [
+                              Colors.transparent,
+                              Color(0x80FFFFFF),
+                              Color(0xB8FFFFFF),
+                            ],
+                            stops: [0.0, 0.40, 1.0],
+                          ).createShader(rect),
+                          blendMode: BlendMode.dstIn,
+                          child: Image.asset(
+                            _imagenesCasos[caso.id]!,
+                            fit: BoxFit.cover,
+                            color: Colors.white.withOpacity(0.88),
+                            colorBlendMode: BlendMode.modulate,
+                          ),
+                        ),
+                      ),
+                    ),
 
                   // Shimmer sweep diagonal
                   Positioned.fill(
@@ -605,13 +656,36 @@ class _CasosScreenState extends State<CasosScreen>
                                         fontSize: 11.5,
                                         height: 1.4),
                                   ),
-                                  // Fecha si existe
+                                  // Fecha operación
                                   if (caso.fechaOp.isNotEmpty) ...[
                                     const SizedBox(height: 4),
                                     Text(caso.fechaOp,
                                         style: TextStyle(
                                             color: AppTheme.subtitleColor2,
                                             fontSize: 10.5)),
+                                  ],
+                                  // Fecha de última modificación/envío
+                                  if (_fechasEstado.containsKey(caso.id)) ...[
+                                    const SizedBox(height: 3),
+                                    Builder(builder: (_) {
+                                      final dt = DateTime.tryParse(_fechasEstado[caso.id]!);
+                                      if (dt == null) return const SizedBox.shrink();
+                                      final label = caso.estado == 'enviado' ? 'Enviado' : 'Modificado';
+                                      final fecha = '${dt.day.toString().padLeft(2,'0')}/${dt.month.toString().padLeft(2,'0')}/${dt.year}  ${dt.hour.toString().padLeft(2,'0')}:${dt.minute.toString().padLeft(2,'0')}';
+                                      return Row(mainAxisSize: MainAxisSize.min, children: [
+                                        Icon(
+                                          caso.estado == 'enviado' ? Icons.send_rounded : Icons.edit_rounded,
+                                          size: 9,
+                                          color: accentColor.withOpacity(0.7),
+                                        ),
+                                        const SizedBox(width: 3),
+                                        Text('$label $fecha',
+                                            style: TextStyle(
+                                                color: accentColor.withOpacity(0.75),
+                                                fontSize: 9.5,
+                                                fontWeight: FontWeight.w600)),
+                                      ]);
+                                    }),
                                   ],
                                 ],
                               ),
