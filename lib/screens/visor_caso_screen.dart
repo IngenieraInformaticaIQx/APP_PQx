@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:webview_flutter/webview_flutter.dart';
@@ -2915,7 +2917,14 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
                           } catch (_) {}
                         },
                       )
-                    : WebViewWidget(controller: _webController),
+                    : WebViewWidget(
+                  controller: _webController,
+                  gestureRecognizers: {
+                    Factory<OneSequenceGestureRecognizer>(
+                          () => EagerGestureRecognizer(),
+                    ),
+                  },
+                ),
               ),
             ),
             // Orbe azul decorativo (esquina superior derecha, fuera del WebView)
@@ -2936,7 +2945,7 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
             ),
             // Watermark se renderiza dentro del WebView
             // Doble tap para abrir el panel lateral
-            if (!_panelAbierto)
+            if (!_panelAbierto && !Platform.isAndroid && !Platform.isIOS)
               Positioned(
                 top: 64, left: 0, right: 0, bottom: 0,
                 child: GestureDetector(
@@ -2947,7 +2956,7 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
             _buildTopBar(),
             _buildBtnLimpiar(),
             // Overlay para cerrar el panel lateral al tocar fuera (excluye topbar)
-            if (_panelAbierto)
+            if (_panelAbierto && !Platform.isAndroid && !Platform.isIOS)
               Positioned(
                 top: 64, left: 0, right: 0, bottom: 0,
                 child: GestureDetector(
