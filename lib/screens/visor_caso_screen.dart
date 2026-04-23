@@ -2764,7 +2764,7 @@ renderer.domElement.addEventListener('pointermove', e=>{
       if(prevP && _giroZPivot){
         const dx = e.clientX - prevP.x;
         const sensibilidad = 0.00067;
-        const angle = -dx * sensibilidad;
+        const angle = (_giroZEsTop ? 1 : -1) * dx * sensibilidad;
         const camFwd = camera.getWorldDirection(new THREE.Vector3());
         const quat = new THREE.Quaternion().setFromAxisAngle(camFwd, angle);
         // Trasladar el origen del modelo girando alrededor del pivote (punta)
