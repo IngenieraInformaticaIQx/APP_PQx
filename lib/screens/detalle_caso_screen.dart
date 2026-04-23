@@ -257,7 +257,9 @@ class _DetalleCasoScreenState extends State<DetalleCasoScreen>
     );
   }
 
-  // FIX: BackdropFilter fuera del AnimatedBuilder para evitar el crash
+  // FIX: BackdropFilter fuera del AnimatedBuild
+  //
+  // er para evitar el crash
   // _dependents.isEmpty al navegar mientras el shimmer está animando.
   // Solo el shimmer sweep se anima, el blur queda estático.
   Widget _buildAccionCard({

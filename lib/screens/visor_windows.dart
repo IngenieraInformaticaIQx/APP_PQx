@@ -16,6 +16,7 @@ class VisorWindows extends StatefulWidget {
   final void Function(String)? onCaptura;
   final void Function(String)? onReglaLibre;
   final void Function(String)? onNotaTap;
+  final void Function(String)? onPlacaArrastrando;
 
   const VisorWindows({
     super.key,
@@ -30,6 +31,7 @@ class VisorWindows extends StatefulWidget {
     this.onCaptura,
     this.onReglaLibre,
     this.onNotaTap,
+    this.onPlacaArrastrando,
   }) : assert(url != null || htmlContent != null,
             'Debe proporcionar url o htmlContent');
 
@@ -57,15 +59,16 @@ class VisorWindowsState extends State<VisorWindows> {
         final channel = map['channel'] as String? ?? '';
         final msg     = map['msg']?.toString() ?? '';
         switch (channel) {
-          case 'VisorReady':     widget.onVisorReady?.call(); break;
-          case 'PlateTapped':    widget.onPlateTapped?.call(msg); break;
-          case 'ScrewPlaced':    widget.onScrewPlaced?.call(msg); break;
-          case 'VisorLog':       widget.onLog?.call(msg); break;
-          case 'TornilloListo':  widget.onTornilloListo?.call(msg); break;
-          case 'CapturaVista':   widget.onCapturaVista?.call(msg); break;
-          case 'Captura':        widget.onCaptura?.call(msg); break;
-          case 'ReglaLibre':     widget.onReglaLibre?.call(msg); break;
-          case 'NotaTap':        widget.onNotaTap?.call(msg); break;
+          case 'VisorReady':        widget.onVisorReady?.call(); break;
+          case 'PlateTapped':       widget.onPlateTapped?.call(msg); break;
+          case 'ScrewPlaced':       widget.onScrewPlaced?.call(msg); break;
+          case 'VisorLog':          widget.onLog?.call(msg); break;
+          case 'TornilloListo':     widget.onTornilloListo?.call(msg); break;
+          case 'CapturaVista':      widget.onCapturaVista?.call(msg); break;
+          case 'Captura':           widget.onCaptura?.call(msg); break;
+          case 'ReglaLibre':        widget.onReglaLibre?.call(msg); break;
+          case 'NotaTap':           widget.onNotaTap?.call(msg); break;
+          case 'PlacaArrastrando':  widget.onPlacaArrastrando?.call(msg); break;
         }
       } catch (_) {}
     });

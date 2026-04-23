@@ -342,6 +342,9 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
     return _sessionAudioId;
   }
 
+  // Arrastrar placa
+  bool _placaArrastrandoActiva = false;
+
   // Regla libre / mediciones
   bool   _modoRegla       = false;
   double? _reglaLibreMm;
@@ -577,6 +580,12 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
               _screwInfoSx = (d['sx'] as num).toDouble();
               _screwInfoSy = (d['sy'] as num).toDouble();
             });
+          } catch (_) {}
+        })..addJavaScriptChannel('PlacaArrastrando', onMessageReceived: (msg) {
+          if (!mounted) return;
+          try {
+            final d = jsonDecode(msg.message) as Map<String, dynamic>;
+            setState(() => _placaArrastrandoActiva = d['active'] == true);
           } catch (_) {}
         })
 
@@ -1290,9 +1299,13 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
 </script>
 <script type="module">
 import * as THREE from 'three';
-import { GLTFLoader }    from 'three/addons/loaders/GLTFLoader.js';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { DRACOLoader }   from 'three/addons/loaders/DRACOLoader.js';
+import { GLTFLoader }      from 'three/addons/loaders/GLTFLoader.js';
+import { OrbitControls }   from 'three/addons/controls/OrbitControls.js';
+import { DRACOLoader }     from 'three/addons/loaders/DRACOLoader.js';
+import { EffectComposer }  from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass }      from 'three/addons/postprocessing/RenderPass.js';
+import { OutlinePass }     from 'three/addons/postprocessing/OutlinePass.js';
+import { OutputPass }      from 'three/addons/postprocessing/OutputPass.js';
 
 // ── Escena ─────────────────────────────────────────────────────────────────
 const scene = new THREE.Scene();
@@ -1332,6 +1345,19 @@ controls.rotateSpeed = 0.8;
 controls.zoomSpeed = 1.2;
 // Evitar saltos al iniciar nuevo gesto
 controls.addEventListener('start', () => { controls.saveState(); });
+
+// ── Post-procesado: OutlinePass para glow de placa seleccionada ─────────────
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, camera));
+const outlinePass = new OutlinePass(new THREE.Vector2(innerWidth, innerHeight), scene, camera);
+outlinePass.edgeStrength  = 5.0;
+outlinePass.edgeGlow      = 1.5;
+outlinePass.edgeThickness = 2.0;
+outlinePass.pulsePeriod   = 0;
+outlinePass.visibleEdgeColor.set(0x2A7FF5);
+outlinePass.hiddenEdgeColor.set(0x1A5FD8);
+composer.addPass(outlinePass);
+composer.addPass(new OutputPass());
 
 
 const draco = new DRACOLoader();
@@ -1386,16 +1412,59 @@ const DRAG_THRESHOLD = 6; // píxeles
 // ── Snap a la trayectoria más cercana al tap ─────────────────────────────
 // Busca en todas las trayectorias cargadas la más cercana al hitPoint
 // Devuelve {pos, dir} con el centro y dirección exactos del agujero
+// Devuelve el glbId de la placa cuya trayectoria más cercana al punto dado
+function _findPlacaGlbId(x, y, z){
+  const pt = new THREE.Vector3(x, y, z);
+  let bestId = null, bestDist = Infinity;
+  for(const id in trayectorias){
+    const plate = modelos[id];
+    if(plate) plate.updateWorldMatrix(true, false);
+    for(const t of trayectorias[id]){
+      const wp = plate ? t.pos.clone().applyMatrix4(plate.matrixWorld) : t.pos.clone();
+      const d = wp.distanceTo(pt);
+      if(d < bestDist){ bestDist = d; bestId = id; }
+    }
+  }
+  return bestId;
+}
+
+// Mueve placa + tornillos asociados a lo largo del eje de la cámara
+function _moverPlacaProfundidad(id, delta){
+  if(!modelos[id]) return;
+  modelos[id].position.addScaledVector(camera.getWorldDirection(new THREE.Vector3()), delta);
+  // Tornillos son hijos del modelo → siguen automáticamente
+  needsRender = true;
+}
+
+// Glow de borde con OutlinePass — outline correcto sobre el mesh real
+function _setPlacaGlow(id, active){
+  if(active && modelos[id]){
+    const selected = [];
+    modelos[id].traverse(c=>{ if(c.isMesh && !c.userData.esTrayectoria) selected.push(c); });
+    outlinePass.selectedObjects = selected;
+  } else {
+    outlinePass.selectedObjects = [];
+  }
+  needsRender = true;
+}
+
 function snapTrayectoriaMasCercana(hitPoint){
   let mejor = null;
   let distMin = Infinity;
   for(const id in trayectorias){
+    const plate = modelos[id];
+    if(plate) plate.updateWorldMatrix(true, false);
     for(const t of trayectorias[id]){
-      const d = t.pos.distanceTo(hitPoint);
-      if(d < distMin){ distMin = d; mejor = t; }
+      const worldPos = plate ? t.pos.clone().applyMatrix4(plate.matrixWorld) : t.pos.clone();
+      const d = worldPos.distanceTo(hitPoint);
+      if(d < distMin){
+        distMin = d;
+        const worldDir = plate ? t.dir.clone().transformDirection(plate.matrixWorld) : t.dir.clone();
+        mejor = {pos: worldPos, dir: worldDir, name: t.name};
+      }
     }
   }
-  return mejor; // null si no hay trayectorias cargadas
+  return mejor;
 }
 
 function b64ToBuffer(b64){
@@ -1768,7 +1837,17 @@ tornilloScene.position.copy(hitPoint)
   }
 
   tornilloScene.userData.instanceId = d.instanceId;
+  const _tGlbId = _findPlacaGlbId(d.x, d.y, d.z);
+  tornilloScene.userData.placaGlbId = _tGlbId;
+  // Añadir primero a la escena (posición en world space), luego reparentar a la placa.
+  // attach() convierte automáticamente a espacio local de la placa preservando la posición mundo.
   scene.add(tornilloScene);
+  if(_tGlbId && modelos[_tGlbId]){
+    modelos[_tGlbId].attach(tornilloScene); // re-parent manteniendo world transform
+  }
+  // origPos/origQuat ahora en espacio local de la placa (lo que devuelve attach)
+  tornilloScene.userData.origPos  = tornilloScene.position.clone();
+  tornilloScene.userData.origQuat = tornilloScene.quaternion.clone();
   modelos[d.instanceId] = tornilloScene;
   _invalidarCacheMeshes();
 
@@ -1928,7 +2007,7 @@ function eliminarRegla(instanceId){
 // ── Eliminar tornillo ──────────────────────────────────────────────────────
 function eliminarTornillo(instanceId){
   const obj = modelos[instanceId]; if(!obj) return;
-  scene.remove(obj);
+  obj.removeFromParent();
   obj.traverse(c=>{ if(c.isMesh){ c.geometry.dispose(); c.material.dispose(); } });
   delete modelos[instanceId];
   _invalidarCacheMeshes();
@@ -2283,10 +2362,13 @@ function resetCamara(){
 }
 
 function limpiarTodo(){
-  // 1. Eliminar todos los GLBs cargados
+  // 1. Eliminar todos los GLBs cargados (los tornillos son hijos de sus placas, se limpian con ellas)
   for(const id in modelos){
     const obj = modelos[id];
-    scene.remove(obj);
+    if(obj.userData.instanceId && String(obj.userData.instanceId).startsWith('screw_')){
+      delete modelos[id]; continue; // ya se elimina al quitar la placa padre
+    }
+    obj.removeFromParent();
     obj.traverse(c=>{
       if(c.geometry) c.geometry.dispose();
       if(c.material){
@@ -2338,25 +2420,51 @@ window.visor={
     needsRender = true;
   },
   capturarVista: function(v){
-    // Mueve a la vista v, espera la animación y envía la imagen por CapturaVista
     setVista(v);
     setTimeout(function(){
-      renderer.render(scene, camera);
+      const prev = outlinePass.selectedObjects.slice();
+      outlinePass.selectedObjects = [];
+      renderer.render(scene, camera); // render directo sin outline para captura limpia
       const dataUrl = renderer.domElement.toDataURL('image/png');
+      outlinePass.selectedObjects = prev;
       CapturaVista.postMessage(dataUrl);
-    }, 500); // 500ms > duración animación (400ms)
+    }, 500);
   },
   capturarPantalla: function(){
-    // Forzar render y capturar canvas como PNG base64
+    const prev = outlinePass.selectedObjects.slice();
+    outlinePass.selectedObjects = [];
     renderer.render(scene, camera);
     const dataUrl = renderer.domElement.toDataURL('image/png');
+    outlinePass.selectedObjects = prev;
     Captura.postMessage(dataUrl);
   },
 };
 
 // ── Detectar tap (no drag) sobre cualquier mesh ────────────────────────────
 let _longPressTimer = null;
+
+// ── Arrastrar placa ─────────────────────────────────────────────────────────
+let _placaArrastrandoId = null;
+let _planoArrastre = new THREE.Plane();
+let _arrastreOffset = new THREE.Vector3();
+let _arrastrandoTimer = null;
+let _arrastreMaxDist = 0; // máximo desplazamiento durante el timer
+let _lastPointerX = 0, _lastPointerY = 0; // posición actual del puntero
+const _arrastreTarget = new THREE.Vector3(); // buffer reutilizable para intersección
+let _dblTapModelId = null, _dblTapTime = 0; // doble tap para reset
+const _glowMeshes = []; // (ya no se usa con OutlinePass, se mantiene por compatibilidad)
+let   _glowMat    = null;
+
+// ── Multi-pointer para rotación/profundidad de placa ────────────────────────
+const _ptrMap  = new Map(); // pointerId → {x,y} posición actual
+const _prevPtr = new Map(); // pointerId → {x,y} posición anterior frame
+let _prevPinchDist = 0;    // distancia anterior entre dos dedos (pinch)
+
 renderer.domElement.addEventListener('pointerdown', e=>{
+  _ptrMap.set(e.pointerId, {x:e.clientX, y:e.clientY});
+  _prevPtr.set(e.pointerId, {x:e.clientX, y:e.clientY});
+  // Si ya arrastramos placa: segundo dedo o click derecho → rotación, no reiniciar timer
+  if(_placaArrastrandoId) return;
   pointerDownX=e.clientX; pointerDownY=e.clientY;
   if(_modoNotaActivo){
     _longPressTimer = setTimeout(()=>{
@@ -2372,9 +2480,131 @@ renderer.domElement.addEventListener('pointerdown', e=>{
         NotaTap.postMessage(JSON.stringify({x:p.x,y:p.y,z:p.z}));
       }
     }, 600);
+  } else {
+    _arrastreMaxDist = 0;
+    _lastPointerX = e.clientX; _lastPointerY = e.clientY;
+    VisorLog.postMessage('drag-timer: pointerdown en x='+e.clientX+' y='+e.clientY);
+    _arrastrandoTimer = setTimeout(()=>{
+      VisorLog.postMessage('drag-timer: fired! maxDist='+_arrastreMaxDist.toFixed(1)+' modelos='+Object.keys(modelos).length+' lastPtr='+_lastPointerX.toFixed(0)+','+_lastPointerY.toFixed(0));
+      if(_arrastreMaxDist > 40){ VisorLog.postMessage('drag-timer: abortado por movimiento'); _arrastrandoTimer=null; return; }
+      const rect = renderer.domElement.getBoundingClientRect();
+      const px = ((_lastPointerX-rect.left)/rect.width)*2-1;
+      const py = -((_lastPointerY-rect.top)/rect.height)*2+1;
+      const rc = new THREE.Raycaster();
+      rc.setFromCamera({x:px,y:py}, camera);
+      const plateMeshes = [];
+      for(const id in modelos){
+        const m = modelos[id];
+        if(!m.userData.esHueso && !(m.userData.instanceId && String(m.userData.instanceId).startsWith('screw_'))){
+          m.traverse(c=>{if(c.isMesh && !c.userData.esTrayectoria && c.visible) plateMeshes.push(c);});
+        }
+      }
+      VisorLog.postMessage('drag-timer: plateMeshes='+plateMeshes.length+' hits='+rc.intersectObjects(plateMeshes,false).length);
+      const hits = rc.intersectObjects(plateMeshes, false);
+      if(hits.length>0){
+        let modelId = null;
+        for(const id in modelos){
+          let found = false;
+          modelos[id].traverse(c=>{ if(c===hits[0].object) found=true; });
+          if(found){ modelId=id; break; }
+        }
+        VisorLog.postMessage('drag-timer: modelId='+modelId);
+        if(modelId){
+          _placaArrastrandoId = modelId;
+          const camDir = camera.getWorldDirection(new THREE.Vector3());
+          _planoArrastre.setFromNormalAndCoplanarPoint(camDir.negate(), hits[0].point);
+          _arrastreOffset.copy(hits[0].point).sub(modelos[modelId].position);
+          controls.enabled = false;
+          _setPlacaGlow(modelId, true);
+          PlacaArrastrando.postMessage(JSON.stringify({id:modelId,active:true}));
+        }
+      }
+    }, 600);
   }
 });
+renderer.domElement.addEventListener('pointermove', e=>{
+  _lastPointerX = e.clientX; _lastPointerY = e.clientY;
+  // Actualizar mapa de punteros
+  const prev = _ptrMap.get(e.pointerId);
+  if(prev) _prevPtr.set(e.pointerId, {x:prev.x, y:prev.y});
+  _ptrMap.set(e.pointerId, {x:e.clientX, y:e.clientY});
+
+  if(_arrastrandoTimer){
+    const d = Math.sqrt((e.clientX-pointerDownX)**2+(e.clientY-pointerDownY)**2);
+    if(d > _arrastreMaxDist) _arrastreMaxDist = d;
+  }
+  if(!_placaArrastrandoId) return;
+
+  const modelo = modelos[_placaArrastrandoId];
+  if(!modelo) return;
+
+  const modoRotar = _ptrMap.size >= 2 || (e.buttons & 2);
+
+  if(modoRotar){
+    // ── Dos dedos o click derecho: rotar + pinch (profundidad) ─────────────
+    let dx = e.movementX || 0;
+    let dy = e.movementY || 0;
+    if(!dx && !dy){
+      const prevP = _prevPtr.get(e.pointerId);
+      if(prevP){ dx = e.clientX - prevP.x; dy = e.clientY - prevP.y; }
+    }
+    // Pinch: profundidad con dos dedos (móvil)
+    if(_ptrMap.size >= 2){
+      const pts = [..._ptrMap.values()];
+      const dist = Math.hypot(pts[1].x-pts[0].x, pts[1].y-pts[0].y);
+      if(_prevPinchDist > 0){
+        const pinchDelta = (dist - _prevPinchDist) * 0.12;
+        _moverPlacaProfundidad(_placaArrastrandoId, pinchDelta);
+      }
+      _prevPinchDist = dist;
+    }
+    const sensibilidad = 0.008; // rad/px
+    const camRight = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0).normalize();
+    const eY = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0), dx*sensibilidad);
+    const eX = new THREE.Quaternion().setFromAxisAngle(camRight, dy*sensibilidad);
+    // rotateOnWorldAxis usa modelo.position como pivote — usamos lo mismo para tornillos
+    modelo.rotateOnWorldAxis(new THREE.Vector3(0,1,0), dx * sensibilidad);
+    modelo.rotateOnWorldAxis(camRight, dy * sensibilidad);
+    // Tornillos son hijos del modelo → siguen la rotación automáticamente
+    needsRender = true;
+  } else if(e.buttons & 1 || _ptrMap.size === 1){
+    // ── Un dedo / click izquierdo: trasladar placa ──────────────────────────
+    const rect = renderer.domElement.getBoundingClientRect();
+    const px = ((e.clientX-rect.left)/rect.width)*2-1;
+    const py = -((e.clientY-rect.top)/rect.height)*2+1;
+    raycaster.setFromCamera({x:px,y:py}, camera);
+    if(raycaster.ray.intersectPlane(_planoArrastre, _arrastreTarget)){
+      modelo.position.copy(_arrastreTarget.clone().sub(_arrastreOffset));
+      // Tornillos son hijos del modelo → siguen la traslación automáticamente
+      needsRender = true;
+    }
+  }
+});
+renderer.domElement.addEventListener('contextmenu', e=>e.preventDefault());
+// Rueda del ratón durante drag → profundidad (adelante/atrás)
+renderer.domElement.addEventListener('wheel', e=>{
+  if(!_placaArrastrandoId) return;
+  e.preventDefault();
+  _moverPlacaProfundidad(_placaArrastrandoId, -e.deltaY * 0.04);
+}, {passive:false});
+renderer.domElement.addEventListener('pointercancel', e=>{
+  _ptrMap.delete(e.pointerId); _prevPtr.delete(e.pointerId);
+  if(_ptrMap.size < 2) _prevPinchDist = 0;
+  VisorLog.postMessage('pointercancel fired');
+  if(_arrastrandoTimer){ clearTimeout(_arrastrandoTimer); _arrastrandoTimer=null; }
+  if(_placaArrastrandoId){ _setPlacaGlow(_placaArrastrandoId, false); controls.enabled=true; _placaArrastrandoId=null; }
+});
 renderer.domElement.addEventListener('pointerup', e=>{
+  _ptrMap.delete(e.pointerId); _prevPtr.delete(e.pointerId);
+  if(_ptrMap.size < 2) _prevPinchDist = 0;
+  if(_arrastrandoTimer){ clearTimeout(_arrastrandoTimer); _arrastrandoTimer=null; }
+  if(_placaArrastrandoId){
+    _setPlacaGlow(_placaArrastrandoId, false);
+    controls.enabled=true;
+    PlacaArrastrando.postMessage(JSON.stringify({id:_placaArrastrandoId,active:false}));
+    _placaArrastrandoId=null;
+    return;
+  }
   if(_longPressTimer){ clearTimeout(_longPressTimer); _longPressTimer=null; }
   // Ignorar si fue un drag
   const dx = e.clientX-pointerDownX, dy = e.clientY-pointerDownY;
@@ -2408,6 +2638,36 @@ renderer.domElement.addEventListener('pointerup', e=>{
   const rect = renderer.domElement.getBoundingClientRect();
   pointer.x  =  ((e.clientX-rect.left)/rect.width )*2-1;
   pointer.y  = -((e.clientY-rect.top) /rect.height)*2+1;
+
+  // Doble tap sobre placa → volver a posición original
+  {
+    const nowDt = Date.now();
+    const rcDt = new THREE.Raycaster(); rcDt.setFromCamera({x:pointer.x,y:pointer.y}, camera);
+    const plateMeshesDt = [];
+    for(const id in modelos){
+      const m = modelos[id];
+      if(!m.userData.esHueso && !(m.userData.instanceId && String(m.userData.instanceId).startsWith('screw_'))){
+        m.traverse(c=>{if(c.isMesh && !c.userData.esTrayectoria && c.visible) plateMeshesDt.push(c);});
+      }
+    }
+    const hitsDt = rcDt.intersectObjects(plateMeshesDt, false);
+    if(hitsDt.length > 0){
+      let tappedId = null;
+      for(const id in modelos){
+        let found=false; modelos[id].traverse(c=>{if(c===hitsDt[0].object) found=true;});
+        if(found){tappedId=id; break;}
+      }
+      if(tappedId && tappedId===_dblTapModelId && nowDt-_dblTapTime<350){
+        // Reset placa a origen — tornillos (hijos) vuelven a sus posiciones locales originales
+        modelos[tappedId].position.set(0,0,0);
+        modelos[tappedId].quaternion.set(0,0,0,1);
+        needsRender=true; _dblTapModelId=null; _dblTapTime=0;
+        PlacaArrastrando.postMessage(JSON.stringify({id:tappedId,active:false,reset:true}));
+        return;
+      }
+      _dblTapModelId = tappedId; _dblTapTime = nowDt;
+    }
+  }
 
   // Detectar tap sobre tornillo colocado → mostrar etiqueta info
   const screwMeshes = [];
@@ -2497,7 +2757,11 @@ renderer.domElement.addEventListener('pointerup', e=>{
       }
     }
     if(trayData){
-      px = trayData.pos.x; py = trayData.pos.y; pz = trayData.pos.z;
+      // Sumar offset actual del modelo por si la placa fue arrastrada
+      const modelOffset = (glbId && modelos[glbId]) ? modelos[glbId].position : new THREE.Vector3();
+      px = trayData.pos.x + modelOffset.x;
+      py = trayData.pos.y + modelOffset.y;
+      pz = trayData.pos.z + modelOffset.z;
       // dir apunta hacia dentro del hueso, necesitamos la normal hacia fuera para orientar
       // la cabeza del tornillo → invertir dirección
       fnx = trayData.dir.x; fny = trayData.dir.y; fnz = trayData.dir.z;
@@ -2526,14 +2790,17 @@ let needsRender = true;
 function animate(){
   requestAnimationFrame(animate);
   controls.update();
-  if(!needsRender) return;
-  renderer.render(scene,camera);
+  if(!needsRender && outlinePass.selectedObjects.length===0) return;
+  composer.render();
   needsRender = false;
 }
 animate();
 controls.addEventListener('change', ()=>{ needsRender = true; });
 window.addEventListener('resize',()=>{
-  camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth,innerHeight);
+  camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth,innerHeight);
+  composer.setSize(innerWidth,innerHeight);
+  outlinePass.resolution.set(innerWidth,innerHeight);
   needsRender = true;
 });
 window._numBiomodelos = 0; // se sobreescribe desde Flutter antes de cargar GLBs
@@ -2565,7 +2832,7 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
 // Adaptador: convierte XYZ.postMessage(msg) en window.chrome.webview.postMessage({channel:'XYZ',msg:msg})
 (function(){
   const channels = ['VisorReady','PlateTapped','ScrewPlaced','VisorLog','TornilloListo',
-                    'CapturaVista','Captura','ReglaLibre','NotaTap','ScrewTapped'];
+                    'CapturaVista','Captura','ReglaLibre','NotaTap','ScrewTapped','PlacaArrastrando'];
   channels.forEach(function(ch){
     window[ch] = { postMessage: function(m){ window.chrome.webview.postMessage(JSON.stringify({channel:ch,msg:m})); } };
   });
@@ -2640,6 +2907,13 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
                           _tornilloListoCompleters[catId]?.complete();
                           _tornilloListoCompleters.remove(catId);
                         },
+                        onPlacaArrastrando: (msg) {
+                          if (!mounted) return;
+                          try {
+                            final d = jsonDecode(msg) as Map<String, dynamic>;
+                            setState(() => _placaArrastrandoActiva = d['active'] == true);
+                          } catch (_) {}
+                        },
                       )
                     : WebViewWidget(controller: _webController),
               ),
@@ -2689,18 +2963,20 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
                 child: Center(
                   child: _glassChip(
                     child: Row(mainAxisSize: MainAxisSize.min, children: [
-                      Icon(_modoRegla ? Icons.straighten : _modoNota ? Icons.push_pin : Icons.touch_app,
-                          color: _modoRegla ? const Color(0xFF2A7FF5) : _modoNota ? const Color(0xFFF5A623) : AppTheme.subtitleColor, size: 12),
+                      Icon(_placaArrastrandoActiva ? Icons.open_with : _modoRegla ? Icons.straighten : _modoNota ? Icons.push_pin : Icons.touch_app,
+                          color: _placaArrastrandoActiva ? const Color(0xFF34C759) : _modoRegla ? const Color(0xFF2A7FF5) : _modoNota ? const Color(0xFFF5A623) : AppTheme.subtitleColor, size: 12),
                       const SizedBox(width: 6),
-                      Text(_modoRegla
+                      Text(_placaArrastrandoActiva
+                          ? 'Mover · Der/2dedos: rotar · Rueda/pinch: profundidad'
+                          : _modoRegla
                           ? (_reglaLibreMm != null
                               ? 'Distancia: ${_reglaLibreMm!.toStringAsFixed(1)} mm'
                               : 'Toca 2 puntos para medir')
                           : _modoNota
                               ? 'Toca el modelo para clavar una nota'
-                              : 'Toca la placa sobre un agujero',
+                              : 'Mantén pulsada una placa para moverla',
                           style: TextStyle(
-                              color: _modoRegla ? const Color(0xFF2A7FF5) : _modoNota ? const Color(0xFFF5A623) : AppTheme.subtitleColor,
+                              color: _placaArrastrandoActiva ? const Color(0xFF34C759) : _modoRegla ? const Color(0xFF2A7FF5) : _modoNota ? const Color(0xFFF5A623) : AppTheme.subtitleColor,
                               fontSize: 10.5)),
                     ]),
                   ),
