@@ -1483,9 +1483,18 @@ function _findPlacaGlbId(x, y, z){
 // Mueve placa + tornillos asociados a lo largo del eje de la cámara
 function _moverPlacaProfundidad(id, delta){
   if(!modelos[id]) return;
-  modelos[id].position.addScaledVector(camera.getWorldDirection(new THREE.Vector3()), delta);
-  // Tornillos son hijos del modelo → siguen automáticamente
+  const dir = camera.getWorldDirection(new THREE.Vector3());
+  modelos[id].position.addScaledVector(dir, delta);
+  if(_placaCenter) _placaCenter.addScaledVector(dir, delta);
   needsRender = true;
+}
+function _rotarAlrededorCentro(modelo, axis, angle){
+  if(!_placaCenter){ modelo.rotateOnWorldAxis(axis, angle); return; }
+  const a = axis.clone().normalize();
+  const offset = modelo.position.clone().sub(_placaCenter);
+  offset.applyAxisAngle(a, angle);
+  modelo.position.copy(_placaCenter.clone().add(offset));
+  modelo.rotateOnWorldAxis(a, angle);
 }
 
 // Glow de borde con OutlinePass — outline correcto sobre el mesh real
@@ -1513,12 +1522,11 @@ function _setPlacaGlow(id, active, modoRojo){
 }
 
 // Crea un indicador rojo (invisible, solo para OutlinePass) en la zona activa
-function _crearIndicadorFondo(modelId, esTop){
+function _crearIndicadorFondo(modelId, esTop, esLateral, esLeft){
   _eliminarIndicadorFondo();
   const modelo = modelos[modelId];
   if(!modelo) return;
   modelo.updateWorldMatrix(true, true);
-  // Bbox en espacio local del modelo (excluye trayectorias y tornillos)
   const localBox = new THREE.Box3();
   modelo.traverse(c=>{
     if(c.isMesh && !c.userData.esTrayectoria && !c.userData.esTornillo && !c.userData.esIndicadorFondo && c.geometry && c.geometry.attributes.position){
@@ -1531,17 +1539,23 @@ function _crearIndicadorFondo(modelId, esTop){
   });
   if(localBox.isEmpty()) return;
   const size = localBox.getSize(new THREE.Vector3());
-  const indicH = size.y * 0.28;
-  const geo = new THREE.BoxGeometry(size.x * 1.01, indicH, size.z * 1.01);
+  let geo, posX, posY;
+  if(esLateral){
+    const indicW = size.x * 0.28;
+    geo = new THREE.BoxGeometry(indicW, size.y * 1.01, size.z * 1.01);
+    posX = esLeft ? localBox.min.x + indicW / 2 : localBox.max.x - indicW / 2;
+    posY = (localBox.min.y + localBox.max.y) / 2;
+  } else {
+    const indicH = size.y * 0.28;
+    geo = new THREE.BoxGeometry(size.x * 1.01, indicH, size.z * 1.01);
+    posX = (localBox.min.x + localBox.max.x) / 2;
+    posY = esTop ? localBox.max.y - indicH / 2 : localBox.min.y + indicH / 2;
+  }
   const mat = new THREE.MeshBasicMaterial({ color:0xFF3030, transparent:true, opacity:0, depthWrite:false });
   const mesh = new THREE.Mesh(geo, mat);
   mesh.userData.esIndicadorFondo = true;
   mesh.renderOrder = 999;
-  mesh.position.set(
-    (localBox.min.x + localBox.max.x) / 2,
-    esTop ? localBox.max.y - indicH / 2 : localBox.min.y + indicH / 2,
-    (localBox.min.z + localBox.max.z) / 2
-  );
+  mesh.position.set(posX, posY, (localBox.min.z + localBox.max.z) / 2);
   modelo.add(mesh);
   _indicadorFondoMesh = mesh;
 }
@@ -2586,6 +2600,10 @@ let _modoGiroZ = false;          // toca zona inferior/superior → péndulo
 let _giroZEsTop = false;         // true = toca cabeza, false = toca culo
 let _indicadorFondoMesh = null;  // mesh rojo indicador zona activa
 let _giroZPivot = null;          // punto de pivote para péndulo
+let _modoGiroY = false;          // toca zona lateral → péndulo lateral
+let _giroYEsLeft = false;        // true = toca lado izquierdo
+let _giroYPivot = null;          // pivote para péndulo lateral
+let _placaCenter = null;         // centro geométrico de la placa (para rotar sobre sí misma)
 
 renderer.domElement.addEventListener('pointerdown', e=>{
   _ptrMap.set(e.pointerId, {x:e.clientX, y:e.clientY});
@@ -2658,19 +2676,40 @@ renderer.domElement.addEventListener('pointerdown', e=>{
           const _relY = _lH > 0 ? (_localHit.y - _lBox.min.y) / _lH : 0.5;
           const _esBottom = _relY < 0.28;
           const _esTop    = _relY > 0.72;
+          const _lW = _lBox.max.x - _lBox.min.x;
+          const _relX = _lW > 0 ? (_localHit.x - _lBox.min.x) / _lW : 0.5;
+          const _esLeft  = _relX < 0.28;
+          const _esRight = _relX > 0.72;
+          // Centro geométrico en world space para rotaciones sobre sí misma
+          _placaCenter = modelos[modelId].localToWorld(new THREE.Vector3(
+            (_lBox.min.x + _lBox.max.x) / 2,
+            (_lBox.min.y + _lBox.max.y) / 2,
+            (_lBox.min.z + _lBox.max.z) / 2
+          ));
           _modoGiroZ  = _esBottom || _esTop;
           _giroZEsTop = _esTop;
+          _modoGiroY  = !_modoGiroZ && (_esLeft || _esRight);
+          _giroYEsLeft = _esLeft;
           if(_modoGiroZ){
-            _crearIndicadorFondo(modelId, _giroZEsTop);
+            _crearIndicadorFondo(modelId, _giroZEsTop, false, false);
             _setPlacaGlow(modelId, true, true);
             _mostrarHint(true);
-            // Péndulo: pivot en el extremo opuesto al que se toca
             const _localPivot = new THREE.Vector3(
               (_lBox.min.x + _lBox.max.x) / 2,
               _giroZEsTop ? _lBox.min.y : _lBox.max.y,
               (_lBox.min.z + _lBox.max.z) / 2
             );
-            _giroZPivot = modelos[modelId].localToWorld(_localPivot);
+            _giroZPivot = modelos[modelId].localToWorld(_localPivot.clone());
+          } else if(_modoGiroY){
+            _crearIndicadorFondo(modelId, false, true, _giroYEsLeft);
+            _setPlacaGlow(modelId, true, true);
+            _mostrarHint(true);
+            const _localPivotY = new THREE.Vector3(
+              _giroYEsLeft ? _lBox.max.x : _lBox.min.x,
+              (_lBox.min.y + _lBox.max.y) / 2,
+              (_lBox.min.z + _lBox.max.z) / 2
+            );
+            _giroYPivot = modelos[modelId].localToWorld(_localPivotY.clone());
           } else {
             _setPlacaGlow(modelId, true, false);
             _mostrarHint(false);
@@ -2725,6 +2764,7 @@ renderer.domElement.addEventListener('pointermove', e=>{
       const camUp    = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 1);
       modelo.position.addScaledVector(camRight,  dMidX * scr2world);
       modelo.position.addScaledVector(camUp,    -dMidY * scr2world);
+      if(_placaCenter){ _placaCenter.addScaledVector(camRight, dMidX * scr2world); _placaCenter.addScaledVector(camUp, -dMidY * scr2world); }
     }
 
     // Profundidad: pinch (distancia entre dedos)
@@ -2738,28 +2778,28 @@ renderer.domElement.addEventListener('pointermove', e=>{
     // (dedos moviéndose en direcciones opuestas o con ángulo diferente)
     const f0dx = pts[0].x - prevPts[0].x - dMidX;
     const f0dy = pts[0].y - prevPts[0].y - dMidY;
-    const sensibilidad = 0.00067;
+    const sensibilidad = 0.0014;
     const camRight2 = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0).normalize();
-    modelo.rotateOnWorldAxis(new THREE.Vector3(0,1,0), f0dx * sensibilidad);
-    modelo.rotateOnWorldAxis(camRight2, f0dy * sensibilidad);
+    _rotarAlrededorCentro(modelo, new THREE.Vector3(0,1,0), f0dx * sensibilidad);
+    _rotarAlrededorCentro(modelo, camRight2, f0dy * sensibilidad);
 
     needsRender = true;
   } else if(modoRotar && (e.buttons & 2)){
-    // ── Click derecho ratón: rotar ───────────────────────────────────────────
+    // ── Click derecho ratón: rotar sobre el centro de la placa ──────────────
     let dx = e.movementX || 0;
     let dy = e.movementY || 0;
     if(!dx && !dy){
       const prevP = _prevPtr.get(e.pointerId);
       if(prevP){ dx = e.clientX - prevP.x; dy = e.clientY - prevP.y; }
     }
-    const sensibilidad = 0.00067;
+    const sensibilidad = 0.0014;
     const camRight = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0).normalize();
-    modelo.rotateOnWorldAxis(new THREE.Vector3(0,1,0), dx * sensibilidad);
-    modelo.rotateOnWorldAxis(camRight, dy * sensibilidad);
+    _rotarAlrededorCentro(modelo, new THREE.Vector3(0,1,0), dx * sensibilidad);
+    _rotarAlrededorCentro(modelo, camRight, dy * sensibilidad);
     needsRender = true;
   } else if(e.buttons & 1 || _ptrMap.size === 1){
     if(_modoGiroZ){
-      // ── Modo péndulo: pivota desde la punta, el culo balancea libre ──────────
+      // ── Péndulo vertical: pivota desde la punta, el extremo libre balancea ──
       const prevP = _prevPtr.get(e.pointerId);
       if(prevP && _giroZPivot){
         const dx = e.clientX - prevP.x;
@@ -2767,12 +2807,27 @@ renderer.domElement.addEventListener('pointermove', e=>{
         const angle = (_giroZEsTop ? 1 : -1) * dx * sensibilidad;
         const camFwd = camera.getWorldDirection(new THREE.Vector3());
         const quat = new THREE.Quaternion().setFromAxisAngle(camFwd, angle);
-        // Trasladar el origen del modelo girando alrededor del pivote (punta)
         const toModel = modelo.position.clone().sub(_giroZPivot);
         toModel.applyQuaternion(quat);
         modelo.position.copy(_giroZPivot.clone().add(toModel));
-        // Rotar también la orientación de la placa
+        if(_placaCenter){ const tc = _placaCenter.clone().sub(_giroZPivot); tc.applyQuaternion(quat); _placaCenter.copy(_giroZPivot.clone().add(tc)); }
         modelo.rotateOnWorldAxis(camFwd, angle);
+        needsRender = true;
+      }
+    } else if(_modoGiroY){
+      // ── Péndulo lateral: pivota desde el borde, el lado libre balancea ──
+      const prevP = _prevPtr.get(e.pointerId);
+      if(prevP && _giroYPivot){
+        const dx = e.clientX - prevP.x;
+        const sensibilidad = 0.00067;
+        const angle = (_giroYEsLeft ? 1 : -1) * dx * sensibilidad;
+        const camUp = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 1).normalize();
+        const quat = new THREE.Quaternion().setFromAxisAngle(camUp, angle);
+        const toModel = modelo.position.clone().sub(_giroYPivot);
+        toModel.applyQuaternion(quat);
+        modelo.position.copy(_giroYPivot.clone().add(toModel));
+        if(_placaCenter){ const tc = _placaCenter.clone().sub(_giroYPivot); tc.applyQuaternion(quat); _placaCenter.copy(_giroYPivot.clone().add(tc)); }
+        modelo.rotateOnWorldAxis(camUp, angle);
         needsRender = true;
       }
     } else {
@@ -2782,8 +2837,9 @@ renderer.domElement.addEventListener('pointermove', e=>{
       const py = -((e.clientY-rect.top)/rect.height)*2+1;
       raycaster.setFromCamera({x:px,y:py}, camera);
       if(raycaster.ray.intersectPlane(_planoArrastre, _arrastreTarget)){
-        modelo.position.copy(_arrastreTarget.clone().sub(_arrastreOffset));
-        // Tornillos son hijos del modelo → siguen la traslación automáticamente
+        const newPos = _arrastreTarget.clone().sub(_arrastreOffset);
+        if(_placaCenter) _placaCenter.add(newPos.clone().sub(modelo.position));
+        modelo.position.copy(newPos);
         needsRender = true;
       }
     }
@@ -2801,19 +2857,20 @@ renderer.domElement.addEventListener('pointercancel', e=>{
   if(_ptrMap.size < 2) _prevPinchDist = 0;
   VisorLog.postMessage('pointercancel fired');
   if(_arrastrandoTimer){ clearTimeout(_arrastrandoTimer); _arrastrandoTimer=null; }
-  if(_placaArrastrandoId){ _setPlacaGlow(_placaArrastrandoId, false); _eliminarIndicadorFondo(); _ocultarHint(); _modoGiroZ=false; _giroZEsTop=false; _giroZPivot=null; controls.enabled=true; _placaArrastrandoId=null; }
+  if(_placaArrastrandoId && _ptrMap.size === 0){ _setPlacaGlow(_placaArrastrandoId, false); _eliminarIndicadorFondo(); _ocultarHint(); _modoGiroZ=false; _giroZEsTop=false; _giroZPivot=null; _modoGiroY=false; _giroYEsLeft=false; _giroYPivot=null; _placaCenter=null; controls.enabled=true; _placaArrastrandoId=null; }
 });
 renderer.domElement.addEventListener('pointerup', e=>{
   _ptrMap.delete(e.pointerId); _prevPtr.delete(e.pointerId);
   if(_ptrMap.size < 2) _prevPinchDist = 0;
   if(_arrastrandoTimer){ clearTimeout(_arrastrandoTimer); _arrastrandoTimer=null; }
   if(_placaArrastrandoId){
+    if(_ptrMap.size > 0){ needsRender=true; return; } // queda otro dedo en pantalla
     _setPlacaGlow(_placaArrastrandoId, false);
     _eliminarIndicadorFondo();
     _ocultarHint();
-    _modoGiroZ = false;
-    _giroZEsTop = false;
-    _giroZPivot = null;
+    _modoGiroZ = false; _giroZEsTop = false; _giroZPivot = null;
+    _modoGiroY = false; _giroYEsLeft = false; _giroYPivot = null;
+    _placaCenter = null;
     controls.enabled=true;
     PlacaArrastrando.postMessage(JSON.stringify({id:_placaArrastrandoId,active:false}));
     _placaArrastrandoId=null;
@@ -3015,9 +3072,11 @@ function animate(){
 }
 document.addEventListener('contextmenu', e => e.preventDefault());
 document.addEventListener('selectstart', e => e.preventDefault());
-// iOS Safari: prevent native long-press text selection before pointer events fire
-renderer.domElement.addEventListener('touchstart', e => e.preventDefault(), {passive:false});
-renderer.domElement.addEventListener('touchmove',  e => e.preventDefault(), {passive:false});
+// iOS Safari: intercept long-press at document level (capture phase) before WKWebView fires callout
+document.addEventListener('touchstart',  e => e.preventDefault(), {passive:false, capture:true});
+document.addEventListener('touchmove',   e => e.preventDefault(), {passive:false, capture:true});
+document.addEventListener('touchend',    e => e.preventDefault(), {passive:false, capture:true});
+document.addEventListener('touchcancel', e => e.preventDefault(), {passive:false, capture:true});
 animate();
 controls.addEventListener('change', ()=>{ needsRender = true; });
 window.addEventListener('resize',()=>{
