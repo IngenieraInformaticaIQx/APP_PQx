@@ -2605,15 +2605,114 @@ let _giroYEsLeft = false;        // true = toca lado izquierdo
 let _giroYPivot = null;          // pivote para péndulo lateral
 let _placaCenter = null;         // centro geométrico de la placa (para rotar sobre sí misma)
 
+// Activa el arrastre de placa desde coordenadas de pantalla (screenX, screenY).
+// Usado tanto por el long-press timer como por el tap de 2 dedos.
+function _tryActivateDrag(screenX, screenY){
+  const rect = renderer.domElement.getBoundingClientRect();
+  const px = ((screenX-rect.left)/rect.width)*2-1;
+  const py = -((screenY-rect.top)/rect.height)*2+1;
+  const rc = new THREE.Raycaster();
+  rc.setFromCamera({x:px,y:py}, camera);
+  const plateMeshes = [];
+  for(const id in modelos){
+    const m = modelos[id];
+    if(!m.userData.esHueso && !(m.userData.instanceId && String(m.userData.instanceId).startsWith('screw_'))){
+      m.traverse(c=>{if(c.isMesh && !c.userData.esTrayectoria && c.visible) plateMeshes.push(c);});
+    }
+  }
+  const hits = rc.intersectObjects(plateMeshes, false);
+  if(hits.length===0) return;
+  let modelId = null;
+  for(const id in modelos){
+    let found = false;
+    modelos[id].traverse(c=>{ if(c===hits[0].object) found=true; });
+    if(found){ modelId=id; break; }
+  }
+  if(!modelId) return;
+  _placaArrastrandoId = modelId;
+  const camDir = camera.getWorldDirection(new THREE.Vector3());
+  _planoArrastre.setFromNormalAndCoplanarPoint(camDir.negate(), hits[0].point);
+  _arrastreOffset.copy(hits[0].point).sub(modelos[modelId].position);
+  controls.enabled = false;
+  modelos[modelId].updateWorldMatrix(true, true);
+  const _lBox = new THREE.Box3();
+  modelos[modelId].traverse(c=>{
+    if(c.isMesh && !c.userData.esTrayectoria && !c.userData.esTornillo && c.geometry && c.geometry.attributes.position){
+      c.updateWorldMatrix(true, false);
+      const _gb = new THREE.Box3().setFromBufferAttribute(c.geometry.attributes.position);
+      _gb.applyMatrix4(new THREE.Matrix4().copy(modelos[modelId].matrixWorld).invert().multiply(c.matrixWorld));
+      _lBox.union(_gb);
+    }
+  });
+  const _localHit = modelos[modelId].worldToLocal(hits[0].point.clone());
+  const _lH = _lBox.max.y - _lBox.min.y;
+  const _relY = _lH > 0 ? (_localHit.y - _lBox.min.y) / _lH : 0.5;
+  const _esBottom = _relY < 0.28;
+  const _esTop    = _relY > 0.72;
+  _placaCenter = modelos[modelId].localToWorld(new THREE.Vector3(
+    (_lBox.min.x + _lBox.max.x) / 2,
+    (_lBox.min.y + _lBox.max.y) / 2,
+    (_lBox.min.z + _lBox.max.z) / 2
+  ));
+  _modoGiroZ  = _esBottom || _esTop;
+  _giroZEsTop = _esTop;
+  const _rr = renderer.domElement.getBoundingClientRect();
+  const _bCorn = [];
+  for(let xi=0;xi<=1;xi++) for(let yi=0;yi<=1;yi++) for(let zi=0;zi<=1;zi++){
+    const wc = modelos[modelId].localToWorld(new THREE.Vector3(
+      xi?_lBox.max.x:_lBox.min.x, yi?_lBox.max.y:_lBox.min.y, zi?_lBox.max.z:_lBox.min.z));
+    const sc = wc.clone().project(camera);
+    _bCorn.push({ sx:(sc.x+1)/2*_rr.width, w:wc.clone() });
+  }
+  const _sSX = Math.min(..._bCorn.map(c=>c.sx));
+  const _sEX = Math.max(..._bCorn.map(c=>c.sx));
+  const _touchSX = screenX - _rr.left;
+  const _screenRelX = _sEX>_sSX ? (_touchSX-_sSX)/(_sEX-_sSX) : 0.5;
+  const _esLeft  = !_modoGiroZ && _screenRelX < 0.28;
+  const _esRight = !_modoGiroZ && _screenRelX > 0.72;
+  _modoGiroY  = _esLeft || _esRight;
+  _giroYEsLeft = _esLeft;
+  if(_modoGiroZ){
+    _crearIndicadorFondo(modelId, _giroZEsTop, false, false);
+    _setPlacaGlow(modelId, true, true);
+    _mostrarHint(true);
+    const _localPivot = new THREE.Vector3(
+      (_lBox.min.x + _lBox.max.x) / 2,
+      _giroZEsTop ? _lBox.min.y : _lBox.max.y,
+      (_lBox.min.z + _lBox.max.z) / 2
+    );
+    _giroZPivot = modelos[modelId].localToWorld(_localPivot.clone());
+  } else if(_modoGiroY){
+    _setPlacaGlow(modelId, true, true);
+    _mostrarHint(true);
+    const _midSX = (_sSX + _sEX) / 2;
+    const _pivCorn = _bCorn.filter(c => _esLeft ? c.sx > _midSX : c.sx < _midSX);
+    const _src = _pivCorn.length > 0 ? _pivCorn : _bCorn;
+    _giroYPivot = _src.reduce((a,c)=>a.add(c.w), new THREE.Vector3()).divideScalar(_src.length);
+  } else {
+    _setPlacaGlow(modelId, true, false);
+    _mostrarHint(false);
+  }
+  PlacaArrastrando.postMessage(JSON.stringify({id:modelId,active:true}));
+}
+
 renderer.domElement.addEventListener('pointerdown', e=>{
   _ptrMap.set(e.pointerId, {x:e.clientX, y:e.clientY});
   _prevPtr.set(e.pointerId, {x:e.clientX, y:e.clientY});
   // Si ya arrastramos placa: segundo dedo o click derecho → rotación, no reiniciar timer
   if(_placaArrastrandoId) return;
   pointerDownX=e.clientX; pointerDownY=e.clientY;
+  // Tap de 2 dedos sobre placa → activar arrastre inmediatamente (sin long press)
+  if(_ptrMap.size === 2 && !_modoNotaActivo){
+    if(_arrastrandoTimer){ clearTimeout(_arrastrandoTimer); _arrastrandoTimer=null; }
+    const ptrs = Array.from(_ptrMap.values());
+    const midX = (ptrs[0].x + ptrs[1].x) / 2;
+    const midY = (ptrs[0].y + ptrs[1].y) / 2;
+    _tryActivateDrag(midX, midY);
+    return;
+  }
   if(_modoNotaActivo){
     _longPressTimer = setTimeout(()=>{
-      // Raycast en ese punto para obtener posición 3D
       const rect = renderer.domElement.getBoundingClientRect();
       const px = ((e.clientX-rect.left)/rect.width)*2-1;
       const py = -((e.clientY-rect.top)/rect.height)*2+1;
@@ -2628,104 +2727,9 @@ renderer.domElement.addEventListener('pointerdown', e=>{
   } else {
     _arrastreMaxDist = 0;
     _lastPointerX = e.clientX; _lastPointerY = e.clientY;
-    VisorLog.postMessage('drag-timer: pointerdown en x='+e.clientX+' y='+e.clientY);
     _arrastrandoTimer = setTimeout(()=>{
-      VisorLog.postMessage('drag-timer: fired! maxDist='+_arrastreMaxDist.toFixed(1)+' modelos='+Object.keys(modelos).length+' lastPtr='+_lastPointerX.toFixed(0)+','+_lastPointerY.toFixed(0));
-      if(_arrastreMaxDist > 40){ VisorLog.postMessage('drag-timer: abortado por movimiento'); _arrastrandoTimer=null; return; }
-      const rect = renderer.domElement.getBoundingClientRect();
-      const px = ((_lastPointerX-rect.left)/rect.width)*2-1;
-      const py = -((_lastPointerY-rect.top)/rect.height)*2+1;
-      const rc = new THREE.Raycaster();
-      rc.setFromCamera({x:px,y:py}, camera);
-      const plateMeshes = [];
-      for(const id in modelos){
-        const m = modelos[id];
-        if(!m.userData.esHueso && !(m.userData.instanceId && String(m.userData.instanceId).startsWith('screw_'))){
-          m.traverse(c=>{if(c.isMesh && !c.userData.esTrayectoria && c.visible) plateMeshes.push(c);});
-        }
-      }
-      VisorLog.postMessage('drag-timer: plateMeshes='+plateMeshes.length+' hits='+rc.intersectObjects(plateMeshes,false).length);
-      const hits = rc.intersectObjects(plateMeshes, false);
-      if(hits.length>0){
-        let modelId = null;
-        for(const id in modelos){
-          let found = false;
-          modelos[id].traverse(c=>{ if(c===hits[0].object) found=true; });
-          if(found){ modelId=id; break; }
-        }
-        VisorLog.postMessage('drag-timer: modelId='+modelId);
-        if(modelId){
-          _placaArrastrandoId = modelId;
-          const camDir = camera.getWorldDirection(new THREE.Vector3());
-          _planoArrastre.setFromNormalAndCoplanarPoint(camDir.negate(), hits[0].point);
-          _arrastreOffset.copy(hits[0].point).sub(modelos[modelId].position);
-          controls.enabled = false;
-          // Detectar si el toque es en la zona inferior → modo giro Z
-          modelos[modelId].updateWorldMatrix(true, true);
-          const _lBox = new THREE.Box3();
-          modelos[modelId].traverse(c=>{
-            if(c.isMesh && !c.userData.esTrayectoria && !c.userData.esTornillo && c.geometry && c.geometry.attributes.position){
-              c.updateWorldMatrix(true, false);
-              const _gb = new THREE.Box3().setFromBufferAttribute(c.geometry.attributes.position);
-              _gb.applyMatrix4(new THREE.Matrix4().copy(modelos[modelId].matrixWorld).invert().multiply(c.matrixWorld));
-              _lBox.union(_gb);
-            }
-          });
-          const _localHit = modelos[modelId].worldToLocal(hits[0].point.clone());
-          const _lH = _lBox.max.y - _lBox.min.y;
-          const _relY = _lH > 0 ? (_localHit.y - _lBox.min.y) / _lH : 0.5;
-          const _esBottom = _relY < 0.28;
-          const _esTop    = _relY > 0.72;
-          // Centro geométrico en world space para rotaciones sobre sí misma
-          _placaCenter = modelos[modelId].localToWorld(new THREE.Vector3(
-            (_lBox.min.x + _lBox.max.x) / 2,
-            (_lBox.min.y + _lBox.max.y) / 2,
-            (_lBox.min.z + _lBox.max.z) / 2
-          ));
-          _modoGiroZ  = _esBottom || _esTop;
-          _giroZEsTop = _esTop;
-          // Detección lateral en espacio de pantalla (no local) para que coincida con lo que ve el usuario
-          const _rr = renderer.domElement.getBoundingClientRect();
-          const _bCorn = [];
-          for(let xi=0;xi<=1;xi++) for(let yi=0;yi<=1;yi++) for(let zi=0;zi<=1;zi++){
-            const wc = modelos[modelId].localToWorld(new THREE.Vector3(
-              xi?_lBox.max.x:_lBox.min.x, yi?_lBox.max.y:_lBox.min.y, zi?_lBox.max.z:_lBox.min.z));
-            const sc = wc.clone().project(camera);
-            _bCorn.push({ sx:(sc.x+1)/2*_rr.width, w:wc.clone() });
-          }
-          const _sSX = Math.min(..._bCorn.map(c=>c.sx));
-          const _sEX = Math.max(..._bCorn.map(c=>c.sx));
-          const _touchSX = _lastPointerX - _rr.left;
-          const _screenRelX = _sEX>_sSX ? (_touchSX-_sSX)/(_sEX-_sSX) : 0.5;
-          const _esLeft  = !_modoGiroZ && _screenRelX < 0.28;
-          const _esRight = !_modoGiroZ && _screenRelX > 0.72;
-          _modoGiroY  = _esLeft || _esRight;
-          _giroYEsLeft = _esLeft;
-          if(_modoGiroZ){
-            _crearIndicadorFondo(modelId, _giroZEsTop, false, false);
-            _setPlacaGlow(modelId, true, true);
-            _mostrarHint(true);
-            const _localPivot = new THREE.Vector3(
-              (_lBox.min.x + _lBox.max.x) / 2,
-              _giroZEsTop ? _lBox.min.y : _lBox.max.y,
-              (_lBox.min.z + _lBox.max.z) / 2
-            );
-            _giroZPivot = modelos[modelId].localToWorld(_localPivot.clone());
-          } else if(_modoGiroY){
-            _setPlacaGlow(modelId, true, true);
-            _mostrarHint(true);
-            // Pivot = centroide de los corners del lado opuesto en pantalla
-            const _midSX = (_sSX + _sEX) / 2;
-            const _pivCorn = _bCorn.filter(c => _esLeft ? c.sx > _midSX : c.sx < _midSX);
-            const _src = _pivCorn.length > 0 ? _pivCorn : _bCorn;
-            _giroYPivot = _src.reduce((a,c)=>a.add(c.w), new THREE.Vector3()).divideScalar(_src.length);
-          } else {
-            _setPlacaGlow(modelId, true, false);
-            _mostrarHint(false);
-          }
-          PlacaArrastrando.postMessage(JSON.stringify({id:modelId,active:true}));
-        }
-      }
+      if(_arrastreMaxDist > 40){ _arrastrandoTimer=null; return; }
+      _tryActivateDrag(_lastPointerX, _lastPointerY);
     }, 600);
   }
 });
