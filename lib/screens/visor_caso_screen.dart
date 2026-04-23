@@ -2599,7 +2599,7 @@ renderer.domElement.addEventListener('pointermove', e=>{
     // Profundidad: pinch (distancia entre dedos)
     const distCur = Math.hypot(pts[1].x-pts[0].x, pts[1].y-pts[0].y);
     if(_prevPinchDist > 0){
-      _moverPlacaProfundidad(_placaArrastrandoId, (distCur - _prevPinchDist) * 0.12);
+      _moverPlacaProfundidad(_placaArrastrandoId, (distCur - _prevPinchDist) * 0.0065);
     }
     _prevPinchDist = distCur;
 
@@ -2607,7 +2607,7 @@ renderer.domElement.addEventListener('pointermove', e=>{
     // (dedos moviéndose en direcciones opuestas o con ángulo diferente)
     const f0dx = pts[0].x - prevPts[0].x - dMidX;
     const f0dy = pts[0].y - prevPts[0].y - dMidY;
-    const sensibilidad = 0.012;
+    const sensibilidad = 0.00067;
     const camRight2 = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0).normalize();
     modelo.rotateOnWorldAxis(new THREE.Vector3(0,1,0), f0dx * sensibilidad);
     modelo.rotateOnWorldAxis(camRight2, f0dy * sensibilidad);
@@ -2621,7 +2621,7 @@ renderer.domElement.addEventListener('pointermove', e=>{
       const prevP = _prevPtr.get(e.pointerId);
       if(prevP){ dx = e.clientX - prevP.x; dy = e.clientY - prevP.y; }
     }
-    const sensibilidad = 0.008;
+    const sensibilidad = 0.00067;
     const camRight = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0).normalize();
     modelo.rotateOnWorldAxis(new THREE.Vector3(0,1,0), dx * sensibilidad);
     modelo.rotateOnWorldAxis(camRight, dy * sensibilidad);
@@ -2644,7 +2644,7 @@ renderer.domElement.addEventListener('contextmenu', e=>e.preventDefault());
 renderer.domElement.addEventListener('wheel', e=>{
   if(!_placaArrastrandoId) return;
   e.preventDefault();
-  _moverPlacaProfundidad(_placaArrastrandoId, -e.deltaY * 0.04);
+  _moverPlacaProfundidad(_placaArrastrandoId, -e.deltaY * 0.002);
 }, {passive:false});
 renderer.domElement.addEventListener('pointercancel', e=>{
   _ptrMap.delete(e.pointerId); _prevPtr.delete(e.pointerId);
