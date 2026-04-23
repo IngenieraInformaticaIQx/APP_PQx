@@ -2568,32 +2568,63 @@ renderer.domElement.addEventListener('pointermove', e=>{
 
   const modoRotar = _ptrMap.size >= 2 || (e.buttons & 2);
 
-  if(modoRotar){
-    // ── Dos dedos o click derecho: rotar + pinch (profundidad) ─────────────
+  if(modoRotar && _ptrMap.size >= 2){
+    // ── Dos dedos táctiles: descomposición en traslación + profundidad + rotación ──
+    // Procesar solo una vez por par de eventos (puntero primario = id más bajo)
+    const ptrIds = [..._ptrMap.keys()].sort((a,b)=>a-b);
+    if(e.pointerId !== ptrIds[0]){ needsRender = true; return; }
+
+    const pts     = ptrIds.map(id => _ptrMap.get(id));
+    const prevPts = ptrIds.map(id => _prevPtr.get(id) || _ptrMap.get(id));
+
+    // Midpoint actual y anterior
+    const midCurX  = (pts[0].x  + pts[1].x)  / 2;
+    const midCurY  = (pts[0].y  + pts[1].y)  / 2;
+    const midPrevX = (prevPts[0].x + prevPts[1].x) / 2;
+    const midPrevY = (prevPts[0].y + prevPts[1].y) / 2;
+    const dMidX = midCurX - midPrevX;
+    const dMidY = midCurY - midPrevY;
+
+    // Traslación lateral: ambos dedos moviéndose en la misma dirección (midpoint delta)
+    if(Math.hypot(dMidX, dMidY) > 0.3){
+      const distCam = camera.position.distanceTo(modelo.position);
+      const tanHFov = Math.tan((camera.fov / 2) * Math.PI / 180);
+      const scr2world = (distCam * tanHFov * 2) / renderer.domElement.clientHeight;
+      const camRight = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0);
+      const camUp    = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 1);
+      modelo.position.addScaledVector(camRight,  dMidX * scr2world);
+      modelo.position.addScaledVector(camUp,    -dMidY * scr2world);
+    }
+
+    // Profundidad: pinch (distancia entre dedos)
+    const distCur = Math.hypot(pts[1].x-pts[0].x, pts[1].y-pts[0].y);
+    if(_prevPinchDist > 0){
+      _moverPlacaProfundidad(_placaArrastrandoId, (distCur - _prevPinchDist) * 0.12);
+    }
+    _prevPinchDist = distCur;
+
+    // Rotación: movimiento relativo de cada dedo respecto al midpoint
+    // (dedos moviéndose en direcciones opuestas o con ángulo diferente)
+    const f0dx = pts[0].x - prevPts[0].x - dMidX;
+    const f0dy = pts[0].y - prevPts[0].y - dMidY;
+    const sensibilidad = 0.012;
+    const camRight2 = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0).normalize();
+    modelo.rotateOnWorldAxis(new THREE.Vector3(0,1,0), f0dx * sensibilidad);
+    modelo.rotateOnWorldAxis(camRight2, f0dy * sensibilidad);
+
+    needsRender = true;
+  } else if(modoRotar && (e.buttons & 2)){
+    // ── Click derecho ratón: rotar ───────────────────────────────────────────
     let dx = e.movementX || 0;
     let dy = e.movementY || 0;
     if(!dx && !dy){
       const prevP = _prevPtr.get(e.pointerId);
       if(prevP){ dx = e.clientX - prevP.x; dy = e.clientY - prevP.y; }
     }
-    // Pinch: profundidad con dos dedos (móvil)
-    if(_ptrMap.size >= 2){
-      const pts = [..._ptrMap.values()];
-      const dist = Math.hypot(pts[1].x-pts[0].x, pts[1].y-pts[0].y);
-      if(_prevPinchDist > 0){
-        const pinchDelta = (dist - _prevPinchDist) * 0.12;
-        _moverPlacaProfundidad(_placaArrastrandoId, pinchDelta);
-      }
-      _prevPinchDist = dist;
-    }
-    const sensibilidad = 0.008; // rad/px
+    const sensibilidad = 0.008;
     const camRight = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0).normalize();
-    const eY = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0), dx*sensibilidad);
-    const eX = new THREE.Quaternion().setFromAxisAngle(camRight, dy*sensibilidad);
-    // rotateOnWorldAxis usa modelo.position como pivote — usamos lo mismo para tornillos
     modelo.rotateOnWorldAxis(new THREE.Vector3(0,1,0), dx * sensibilidad);
     modelo.rotateOnWorldAxis(camRight, dy * sensibilidad);
-    // Tornillos son hijos del modelo → siguen la rotación automáticamente
     needsRender = true;
   } else if(e.buttons & 1 || _ptrMap.size === 1){
     // ── Un dedo / click izquierdo: trasladar placa ──────────────────────────
@@ -2785,14 +2816,19 @@ renderer.domElement.addEventListener('pointerup', e=>{
       }
     }
     if(trayData){
-      // Sumar offset actual del modelo por si la placa fue arrastrada
-      const modelOffset = (glbId && modelos[glbId]) ? modelos[glbId].position : new THREE.Vector3();
-      px = trayData.pos.x + modelOffset.x;
-      py = trayData.pos.y + modelOffset.y;
-      pz = trayData.pos.z + modelOffset.z;
-      // dir apunta hacia dentro del hueso, necesitamos la normal hacia fuera para orientar
-      // la cabeza del tornillo → invertir dirección
-      fnx = trayData.dir.x; fny = trayData.dir.y; fnz = trayData.dir.z;
+      if(glbId && modelos[glbId]){
+        // Aplicar matriz completa del modelo (traslación + rotación) para que los
+        // tornillos sigan correctamente tanto si la placa se arrastró como si se rotó
+        modelos[glbId].updateWorldMatrix(true, false);
+        const mat = modelos[glbId].matrixWorld;
+        const wp = trayData.pos.clone().applyMatrix4(mat);
+        px = wp.x; py = wp.y; pz = wp.z;
+        const wd = trayData.dir.clone().transformDirection(mat);
+        fnx = wd.x; fny = wd.y; fnz = wd.z;
+      } else {
+        px = trayData.pos.x; py = trayData.pos.y; pz = trayData.pos.z;
+        fnx = trayData.dir.x; fny = trayData.dir.y; fnz = trayData.dir.z;
+      }
     }
     VisorLog.postMessage(
   'TRAY TAP ' + obj.name +
@@ -2824,6 +2860,9 @@ function animate(){
 }
 document.addEventListener('contextmenu', e => e.preventDefault());
 document.addEventListener('selectstart', e => e.preventDefault());
+// iOS Safari: prevent native long-press text selection before pointer events fire
+renderer.domElement.addEventListener('touchstart', e => e.preventDefault(), {passive:false});
+renderer.domElement.addEventListener('touchmove',  e => e.preventDefault(), {passive:false});
 animate();
 controls.addEventListener('change', ()=>{ needsRender = true; });
 window.addEventListener('resize',()=>{
