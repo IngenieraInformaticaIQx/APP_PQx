@@ -3081,7 +3081,15 @@ function animate(){
 }
 document.addEventListener('contextmenu', e => e.preventDefault());
 document.addEventListener('selectstart', e => e.preventDefault());
-// CSS touch-action:none evita scroll/zoom; NO hacer preventDefault en touchstart (cancela pointer events en Android)
+// En iOS WKWebView el long-press nativo selecciona la pantalla aunque user-select:none esté activo.
+// preventDefault en touchstart lo bloquea sin cancelar pointer events (a diferencia de Android).
+const _isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+               (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+if (_isIOS) {
+  renderer.domElement.addEventListener('touchstart', e => e.preventDefault(), {passive: false});
+  document.addEventListener('touchstart',            e => e.preventDefault(), {passive: false});
+}
+// CSS touch-action:none evita scroll/zoom; NO hacer preventDefault en touchstart en Android (cancela pointer events)
 // Pinch de profundidad vía touch events (passive=true para no interferir con pointer events)
 let _prevPinchDistTouch = 0;
 renderer.domElement.addEventListener('touchmove', e=>{
