@@ -2907,13 +2907,21 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
                           _tornilloListoCompleters[catId]?.complete();
                           _tornilloListoCompleters.remove(catId);
                         },
-                        onPlacaArrastrando: (msg) {
-                          if (!mounted) return;
-                          try {
-                            final d = jsonDecode(msg) as Map<String, dynamic>;
-                            setState(() => _placaArrastrandoActiva = d['active'] == true);
-                          } catch (_) {}
-                        },
+                  onPlacaArrastrando: (msg) {
+                    if (!mounted) return;
+
+                    try {
+                      final d = jsonDecode(msg) as Map<String, dynamic>;
+                      final activa = d['active'] == true;
+
+                      if (activa && !_placaArrastrandoActiva) {
+                        HapticFeedback.lightImpact();
+                      }
+
+                      setState(() => _placaArrastrandoActiva = activa);
+
+                    } catch (_) {}
+                  },
                       )
                     : WebViewWidget(controller: _webController),
               ),
