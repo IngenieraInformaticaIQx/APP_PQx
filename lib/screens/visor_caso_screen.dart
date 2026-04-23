@@ -1312,9 +1312,33 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
   .spinner{width:34px;height:34px;border:2.5px solid rgba(42,127,245,0.2);
     border-top-color:rgba(42,127,245,0.85);border-radius:50%;animation:spin .75s linear infinite;}
   @keyframes spin{to{transform:rotate(360deg);}}
+  #hint-overlay{
+    position:fixed;bottom:72px;left:50%;transform:translateX(-50%);
+    display:flex;gap:18px;align-items:center;
+    background:rgba(20,20,30,0.62);backdrop-filter:blur(8px);
+    border-radius:20px;padding:9px 20px;
+    pointer-events:none;z-index:50;
+    opacity:0;transition:opacity 0.2s ease;
+    white-space:nowrap;
+  }
+  #hint-overlay.visible{ opacity:1; }
+  .hint-item{
+    display:flex;align-items:center;gap:6px;
+    font-family:-apple-system,sans-serif;font-size:12px;font-weight:500;
+    color:rgba(255,255,255,0.88);
+  }
+  .hint-item .hi{font-size:16px;line-height:1;}
+  .hint-sep{ width:1px;height:22px;background:rgba(255,255,255,0.18); }
 </style>
 </head>
 <body>
+<div id="hint-overlay">
+  <div class="hint-item"><span class="hi">☝️</span><span>mover</span></div>
+  <div class="hint-sep"></div>
+  <div class="hint-item"><span class="hi">✌️</span><span>rotar</span></div>
+  <div class="hint-sep"></div>
+  <div class="hint-item"><span class="hi">🤏</span><span>profundidad</span></div>
+</div>
 <div id="loading"><div class="spinner"></div><span>Cargando modelo…</span></div>
 <div id="watermark"><div class="wm-nombre" id="wm-nombre"></div><div class="wm-paciente" id="wm-paciente"></div></div>
 <div id="orbes" style="position:fixed;inset:0;pointer-events:none;z-index:1;overflow:hidden;">
@@ -1465,15 +1489,86 @@ function _moverPlacaProfundidad(id, delta){
 }
 
 // Glow de borde con OutlinePass — outline correcto sobre el mesh real
-function _setPlacaGlow(id, active){
+function _setPlacaGlow(id, active, modoRojo){
   if(active && modelos[id]){
-    const selected = [];
-    modelos[id].traverse(c=>{ if(c.isMesh && !c.userData.esTrayectoria) selected.push(c); });
-    outlinePass.selectedObjects = selected;
+    if(modoRojo){
+      outlinePass.visibleEdgeColor.set(0xFF3030);
+      outlinePass.hiddenEdgeColor.set(0xCC0000);
+      const selected = [];
+      modelos[id].traverse(c=>{ if(c.isMesh && !c.userData.esTrayectoria && !c.userData.esIndicadorFondo) selected.push(c); });
+      outlinePass.selectedObjects = selected;
+    } else {
+      outlinePass.visibleEdgeColor.set(0x2A7FF5);
+      outlinePass.hiddenEdgeColor.set(0x1A5FD8);
+      const selected = [];
+      modelos[id].traverse(c=>{ if(c.isMesh && !c.userData.esTrayectoria && !c.userData.esIndicadorFondo) selected.push(c); });
+      outlinePass.selectedObjects = selected;
+    }
   } else {
+    outlinePass.visibleEdgeColor.set(0x2A7FF5);
+    outlinePass.hiddenEdgeColor.set(0x1A5FD8);
     outlinePass.selectedObjects = [];
   }
   needsRender = true;
+}
+
+// Crea un indicador rojo semitransparente en la zona inferior de la placa
+function _crearIndicadorFondo(modelId){
+  _eliminarIndicadorFondo();
+  const modelo = modelos[modelId];
+  if(!modelo) return;
+  modelo.updateWorldMatrix(true, true);
+  // Bbox en espacio local del modelo (excluye trayectorias y tornillos)
+  const localBox = new THREE.Box3();
+  modelo.traverse(c=>{
+    if(c.isMesh && !c.userData.esTrayectoria && !c.userData.esTornillo && !c.userData.esIndicadorFondo && c.geometry && c.geometry.attributes.position){
+      c.updateWorldMatrix(true, false);
+      const gb = new THREE.Box3().setFromBufferAttribute(c.geometry.attributes.position);
+      const m4 = new THREE.Matrix4().copy(modelo.matrixWorld).invert().multiply(c.matrixWorld);
+      gb.applyMatrix4(m4);
+      localBox.union(gb);
+    }
+  });
+  if(localBox.isEmpty()) return;
+  const size = localBox.getSize(new THREE.Vector3());
+  const indicH = size.y * 0.28;
+  const geo = new THREE.BoxGeometry(size.x * 1.01, indicH, size.z * 1.01);
+  const mat = new THREE.MeshBasicMaterial({ color:0xFF3030, transparent:true, opacity:0, depthWrite:false });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.userData.esIndicadorFondo = true;
+  mesh.renderOrder = 999;
+  mesh.position.set(
+    (localBox.min.x + localBox.max.x) / 2,
+    localBox.min.y + indicH / 2,
+    (localBox.min.z + localBox.max.z) / 2
+  );
+  modelo.add(mesh);
+  _indicadorFondoMesh = mesh;
+}
+
+function _mostrarHint(modoRojo){
+  const el = document.getElementById('hint-overlay');
+  if(!el) return;
+  if(modoRojo){
+    el.innerHTML = '<div class="hint-item"><span class="hi">↺</span><span>péndulo</span></div>';
+  } else {
+    el.innerHTML = '<div class="hint-item"><span class="hi">☝️</span><span>mover</span></div><div class="hint-sep"></div><div class="hint-item"><span class="hi">✌️</span><span>rotar</span></div><div class="hint-sep"></div><div class="hint-item"><span class="hi">🤏</span><span>profundidad</span></div>';
+  }
+  el.classList.add('visible');
+}
+function _ocultarHint(){
+  const el = document.getElementById('hint-overlay');
+  if(el) el.classList.remove('visible');
+}
+
+function _eliminarIndicadorFondo(){
+  if(_indicadorFondoMesh){
+    if(_indicadorFondoMesh.parent) _indicadorFondoMesh.parent.remove(_indicadorFondoMesh);
+    if(_indicadorFondoMesh.geometry) _indicadorFondoMesh.geometry.dispose();
+    if(_indicadorFondoMesh.material) _indicadorFondoMesh.material.dispose();
+    _indicadorFondoMesh = null;
+    needsRender = true;
+  }
 }
 
 function snapTrayectoriaMasCercana(hitPoint){
@@ -2487,6 +2582,9 @@ let   _glowMat    = null;
 const _ptrMap  = new Map(); // pointerId → {x,y} posición actual
 const _prevPtr = new Map(); // pointerId → {x,y} posición anterior frame
 let _prevPinchDist = 0;    // distancia anterior entre dos dedos (pinch)
+let _modoGiroZ = false;          // toca zona inferior → rotación tipo reloj
+let _indicadorFondoMesh = null;  // mesh rojo indicador zona inferior
+let _giroZPivot = null;          // punto de pivote (punta de la placa) para péndulo
 
 renderer.domElement.addEventListener('pointerdown', e=>{
   _ptrMap.set(e.pointerId, {x:e.clientX, y:e.clientY});
@@ -2543,7 +2641,35 @@ renderer.domElement.addEventListener('pointerdown', e=>{
           _planoArrastre.setFromNormalAndCoplanarPoint(camDir.negate(), hits[0].point);
           _arrastreOffset.copy(hits[0].point).sub(modelos[modelId].position);
           controls.enabled = false;
-          _setPlacaGlow(modelId, true);
+          // Detectar si el toque es en la zona inferior → modo giro Z
+          modelos[modelId].updateWorldMatrix(true, true);
+          const _lBox = new THREE.Box3();
+          modelos[modelId].traverse(c=>{
+            if(c.isMesh && !c.userData.esTrayectoria && !c.userData.esTornillo && c.geometry && c.geometry.attributes.position){
+              c.updateWorldMatrix(true, false);
+              const _gb = new THREE.Box3().setFromBufferAttribute(c.geometry.attributes.position);
+              _gb.applyMatrix4(new THREE.Matrix4().copy(modelos[modelId].matrixWorld).invert().multiply(c.matrixWorld));
+              _lBox.union(_gb);
+            }
+          });
+          const _localHit = modelos[modelId].worldToLocal(hits[0].point.clone());
+          const _lH = _lBox.max.y - _lBox.min.y;
+          _modoGiroZ = (_lH > 0) && ((_localHit.y - _lBox.min.y) / _lH) < 0.28;
+          if(_modoGiroZ){
+            _crearIndicadorFondo(modelId);
+            _setPlacaGlow(modelId, true, true);
+            _mostrarHint(true);
+            // Pivote = punta superior de la placa en espacio mundo (para péndulo)
+            const _localTop = new THREE.Vector3(
+              (_lBox.min.x + _lBox.max.x) / 2,
+              _lBox.max.y,
+              (_lBox.min.z + _lBox.max.z) / 2
+            );
+            _giroZPivot = modelos[modelId].localToWorld(_localTop);
+          } else {
+            _setPlacaGlow(modelId, true, false);
+            _mostrarHint(false);
+          }
           PlacaArrastrando.postMessage(JSON.stringify({id:modelId,active:true}));
         }
       }
@@ -2627,15 +2753,34 @@ renderer.domElement.addEventListener('pointermove', e=>{
     modelo.rotateOnWorldAxis(camRight, dy * sensibilidad);
     needsRender = true;
   } else if(e.buttons & 1 || _ptrMap.size === 1){
-    // ── Un dedo / click izquierdo: trasladar placa ──────────────────────────
-    const rect = renderer.domElement.getBoundingClientRect();
-    const px = ((e.clientX-rect.left)/rect.width)*2-1;
-    const py = -((e.clientY-rect.top)/rect.height)*2+1;
-    raycaster.setFromCamera({x:px,y:py}, camera);
-    if(raycaster.ray.intersectPlane(_planoArrastre, _arrastreTarget)){
-      modelo.position.copy(_arrastreTarget.clone().sub(_arrastreOffset));
-      // Tornillos son hijos del modelo → siguen la traslación automáticamente
-      needsRender = true;
+    if(_modoGiroZ){
+      // ── Modo péndulo: pivota desde la punta, el culo balancea libre ──────────
+      const prevP = _prevPtr.get(e.pointerId);
+      if(prevP && _giroZPivot){
+        const dx = e.clientX - prevP.x;
+        const sensibilidad = 0.00067;
+        const angle = -dx * sensibilidad;
+        const camFwd = camera.getWorldDirection(new THREE.Vector3());
+        const quat = new THREE.Quaternion().setFromAxisAngle(camFwd, angle);
+        // Trasladar el origen del modelo girando alrededor del pivote (punta)
+        const toModel = modelo.position.clone().sub(_giroZPivot);
+        toModel.applyQuaternion(quat);
+        modelo.position.copy(_giroZPivot.clone().add(toModel));
+        // Rotar también la orientación de la placa
+        modelo.rotateOnWorldAxis(camFwd, angle);
+        needsRender = true;
+      }
+    } else {
+      // ── Un dedo / click izquierdo: trasladar placa ──────────────────────
+      const rect = renderer.domElement.getBoundingClientRect();
+      const px = ((e.clientX-rect.left)/rect.width)*2-1;
+      const py = -((e.clientY-rect.top)/rect.height)*2+1;
+      raycaster.setFromCamera({x:px,y:py}, camera);
+      if(raycaster.ray.intersectPlane(_planoArrastre, _arrastreTarget)){
+        modelo.position.copy(_arrastreTarget.clone().sub(_arrastreOffset));
+        // Tornillos son hijos del modelo → siguen la traslación automáticamente
+        needsRender = true;
+      }
     }
   }
 });
@@ -2651,7 +2796,7 @@ renderer.domElement.addEventListener('pointercancel', e=>{
   if(_ptrMap.size < 2) _prevPinchDist = 0;
   VisorLog.postMessage('pointercancel fired');
   if(_arrastrandoTimer){ clearTimeout(_arrastrandoTimer); _arrastrandoTimer=null; }
-  if(_placaArrastrandoId){ _setPlacaGlow(_placaArrastrandoId, false); controls.enabled=true; _placaArrastrandoId=null; }
+  if(_placaArrastrandoId){ _setPlacaGlow(_placaArrastrandoId, false); _eliminarIndicadorFondo(); _ocultarHint(); _modoGiroZ=false; _giroZPivot=null; controls.enabled=true; _placaArrastrandoId=null; }
 });
 renderer.domElement.addEventListener('pointerup', e=>{
   _ptrMap.delete(e.pointerId); _prevPtr.delete(e.pointerId);
@@ -2659,6 +2804,10 @@ renderer.domElement.addEventListener('pointerup', e=>{
   if(_arrastrandoTimer){ clearTimeout(_arrastrandoTimer); _arrastrandoTimer=null; }
   if(_placaArrastrandoId){
     _setPlacaGlow(_placaArrastrandoId, false);
+    _eliminarIndicadorFondo();
+    _ocultarHint();
+    _modoGiroZ = false;
+    _giroZPivot = null;
     controls.enabled=true;
     PlacaArrastrando.postMessage(JSON.stringify({id:_placaArrastrandoId,active:false}));
     _placaArrastrandoId=null;
