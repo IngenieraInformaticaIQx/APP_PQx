@@ -2676,10 +2676,6 @@ renderer.domElement.addEventListener('pointerdown', e=>{
           const _relY = _lH > 0 ? (_localHit.y - _lBox.min.y) / _lH : 0.5;
           const _esBottom = _relY < 0.28;
           const _esTop    = _relY > 0.72;
-          const _lW = _lBox.max.x - _lBox.min.x;
-          const _relX = _lW > 0 ? (_localHit.x - _lBox.min.x) / _lW : 0.5;
-          const _esLeft  = _relX < 0.28;
-          const _esRight = _relX > 0.72;
           // Centro geométrico en world space para rotaciones sobre sí misma
           _placaCenter = modelos[modelId].localToWorld(new THREE.Vector3(
             (_lBox.min.x + _lBox.max.x) / 2,
@@ -2688,7 +2684,22 @@ renderer.domElement.addEventListener('pointerdown', e=>{
           ));
           _modoGiroZ  = _esBottom || _esTop;
           _giroZEsTop = _esTop;
-          _modoGiroY  = !_modoGiroZ && (_esLeft || _esRight);
+          // Detección lateral en espacio de pantalla (no local) para que coincida con lo que ve el usuario
+          const _rr = renderer.domElement.getBoundingClientRect();
+          const _bCorn = [];
+          for(let xi=0;xi<=1;xi++) for(let yi=0;yi<=1;yi++) for(let zi=0;zi<=1;zi++){
+            const wc = modelos[modelId].localToWorld(new THREE.Vector3(
+              xi?_lBox.max.x:_lBox.min.x, yi?_lBox.max.y:_lBox.min.y, zi?_lBox.max.z:_lBox.min.z));
+            const sc = wc.clone().project(camera);
+            _bCorn.push({ sx:(sc.x+1)/2*_rr.width, w:wc.clone() });
+          }
+          const _sSX = Math.min(..._bCorn.map(c=>c.sx));
+          const _sEX = Math.max(..._bCorn.map(c=>c.sx));
+          const _touchSX = _lastPointerX - _rr.left;
+          const _screenRelX = _sEX>_sSX ? (_touchSX-_sSX)/(_sEX-_sSX) : 0.5;
+          const _esLeft  = !_modoGiroZ && _screenRelX < 0.28;
+          const _esRight = !_modoGiroZ && _screenRelX > 0.72;
+          _modoGiroY  = _esLeft || _esRight;
           _giroYEsLeft = _esLeft;
           if(_modoGiroZ){
             _crearIndicadorFondo(modelId, _giroZEsTop, false, false);
@@ -2701,15 +2712,13 @@ renderer.domElement.addEventListener('pointerdown', e=>{
             );
             _giroZPivot = modelos[modelId].localToWorld(_localPivot.clone());
           } else if(_modoGiroY){
-            _crearIndicadorFondo(modelId, false, true, _giroYEsLeft);
             _setPlacaGlow(modelId, true, true);
             _mostrarHint(true);
-            const _localPivotY = new THREE.Vector3(
-              _giroYEsLeft ? _lBox.max.x : _lBox.min.x,
-              (_lBox.min.y + _lBox.max.y) / 2,
-              (_lBox.min.z + _lBox.max.z) / 2
-            );
-            _giroYPivot = modelos[modelId].localToWorld(_localPivotY.clone());
+            // Pivot = centroide de los corners del lado opuesto en pantalla
+            const _midSX = (_sSX + _sEX) / 2;
+            const _pivCorn = _bCorn.filter(c => _esLeft ? c.sx > _midSX : c.sx < _midSX);
+            const _src = _pivCorn.length > 0 ? _pivCorn : _bCorn;
+            _giroYPivot = _src.reduce((a,c)=>a.add(c.w), new THREE.Vector3()).divideScalar(_src.length);
           } else {
             _setPlacaGlow(modelId, true, false);
             _mostrarHint(false);
@@ -3072,11 +3081,18 @@ function animate(){
 }
 document.addEventListener('contextmenu', e => e.preventDefault());
 document.addEventListener('selectstart', e => e.preventDefault());
-// iOS Safari: intercept long-press at document level (capture phase) before WKWebView fires callout
-document.addEventListener('touchstart',  e => e.preventDefault(), {passive:false, capture:true});
-document.addEventListener('touchmove',   e => e.preventDefault(), {passive:false, capture:true});
-document.addEventListener('touchend',    e => e.preventDefault(), {passive:false, capture:true});
-document.addEventListener('touchcancel', e => e.preventDefault(), {passive:false, capture:true});
+// CSS touch-action:none evita scroll/zoom; NO hacer preventDefault en touchstart (cancela pointer events en Android)
+// Pinch de profundidad vía touch events (passive=true para no interferir con pointer events)
+let _prevPinchDistTouch = 0;
+renderer.domElement.addEventListener('touchmove', e=>{
+  if(!_placaArrastrandoId || e.touches.length < 2) return;
+  const t0=e.touches[0], t1=e.touches[1];
+  const d = Math.hypot(t1.clientX-t0.clientX, t1.clientY-t0.clientY);
+  if(_prevPinchDistTouch > 0) _moverPlacaProfundidad(_placaArrastrandoId, (d-_prevPinchDistTouch)*0.0065);
+  _prevPinchDistTouch = d;
+}, {passive:true});
+renderer.domElement.addEventListener('touchend',    e=>{ if(e.touches.length<2) _prevPinchDistTouch=0; }, {passive:true});
+renderer.domElement.addEventListener('touchcancel', e=>{ _prevPinchDistTouch=0; }, {passive:true});
 animate();
 controls.addEventListener('change', ()=>{ needsRender = true; });
 window.addEventListener('resize',()=>{
