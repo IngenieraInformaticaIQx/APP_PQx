@@ -3246,16 +3246,16 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
             if (_planoCortando) _buildPanelCorte(),
             // Popup de selección de tornillo
             if (_tapPendiente != null) _buildScrewPopup(context),
-            // Etiqueta info tornillo
-            if (_screwInfoTc != null) ...[
-              Positioned.fill(
-                child: GestureDetector(
-                  behavior: HitTestBehavior.translucent,
-                  onTap: () => setState(() => _screwInfoTc = null),
-                ),
-              ),
-              _buildScrewInfoLabel(context),
-            ],
+            // Etiqueta info tornillo — oculta temporalmente
+            // if (_screwInfoTc != null) ...[
+            //   Positioned.fill(
+            //     child: GestureDetector(
+            //       behavior: HitTestBehavior.translucent,
+            //       onTap: () => setState(() => _screwInfoTc = null),
+            //     ),
+            //   ),
+            //   _buildScrewInfoLabel(context),
+            // ],
           ]),
         ),
       ),
