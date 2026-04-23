@@ -1260,9 +1260,35 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <style>
-  *{margin:0;padding:0;box-sizing:border-box;}
-  html,body{width:100%;height:100%;overflow:hidden;background:#F0F0F3;touch-action:none;}
-  canvas{display:block;width:100%!important;height:100%!important;touch-action:none;outline:none;}
+  *{
+  margin:0;
+  padding:0;
+  box-sizing:border-box;
+  -webkit-user-select:none;
+  user-select:none;
+  -webkit-touch-callout:none;
+  -webkit-tap-highlight-color:transparent;
+}
+  html,body{
+  width:100%;
+  height:100%;
+  overflow:hidden;
+  background:#F0F0F3;
+  touch-action:none;
+  -webkit-user-select:none;
+  user-select:none;
+  -webkit-touch-callout:none;
+}
+  canvas{
+  display:block;
+  width:100%!important;
+  height:100%!important;
+  touch-action:none;
+  outline:none;
+  -webkit-user-select:none;
+  user-select:none;
+  -webkit-touch-callout:none;
+}
   #loading{
     position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
     background:linear-gradient(160deg,#F0F0F3 0%,#DCDCE8 100%);
@@ -2796,6 +2822,8 @@ function animate(){
   composer.render();
   needsRender = false;
 }
+document.addEventListener('contextmenu', e => e.preventDefault());
+document.addEventListener('selectstart', e => e.preventDefault());
 animate();
 controls.addEventListener('change', ()=>{ needsRender = true; });
 window.addEventListener('resize',()=>{
