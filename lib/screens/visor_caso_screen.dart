@@ -1512,8 +1512,8 @@ function _setPlacaGlow(id, active, modoRojo){
   needsRender = true;
 }
 
-// Crea un indicador rojo semitransparente en la zona inferior de la placa
-function _crearIndicadorFondo(modelId){
+// Crea un indicador rojo (invisible, solo para OutlinePass) en la zona activa
+function _crearIndicadorFondo(modelId, esTop){
   _eliminarIndicadorFondo();
   const modelo = modelos[modelId];
   if(!modelo) return;
@@ -1539,7 +1539,7 @@ function _crearIndicadorFondo(modelId){
   mesh.renderOrder = 999;
   mesh.position.set(
     (localBox.min.x + localBox.max.x) / 2,
-    localBox.min.y + indicH / 2,
+    esTop ? localBox.max.y - indicH / 2 : localBox.min.y + indicH / 2,
     (localBox.min.z + localBox.max.z) / 2
   );
   modelo.add(mesh);
@@ -2582,9 +2582,10 @@ let   _glowMat    = null;
 const _ptrMap  = new Map(); // pointerId → {x,y} posición actual
 const _prevPtr = new Map(); // pointerId → {x,y} posición anterior frame
 let _prevPinchDist = 0;    // distancia anterior entre dos dedos (pinch)
-let _modoGiroZ = false;          // toca zona inferior → rotación tipo reloj
-let _indicadorFondoMesh = null;  // mesh rojo indicador zona inferior
-let _giroZPivot = null;          // punto de pivote (punta de la placa) para péndulo
+let _modoGiroZ = false;          // toca zona inferior/superior → péndulo
+let _giroZEsTop = false;         // true = toca cabeza, false = toca culo
+let _indicadorFondoMesh = null;  // mesh rojo indicador zona activa
+let _giroZPivot = null;          // punto de pivote para péndulo
 
 renderer.domElement.addEventListener('pointerdown', e=>{
   _ptrMap.set(e.pointerId, {x:e.clientX, y:e.clientY});
@@ -2654,18 +2655,22 @@ renderer.domElement.addEventListener('pointerdown', e=>{
           });
           const _localHit = modelos[modelId].worldToLocal(hits[0].point.clone());
           const _lH = _lBox.max.y - _lBox.min.y;
-          _modoGiroZ = (_lH > 0) && ((_localHit.y - _lBox.min.y) / _lH) < 0.28;
+          const _relY = _lH > 0 ? (_localHit.y - _lBox.min.y) / _lH : 0.5;
+          const _esBottom = _relY < 0.28;
+          const _esTop    = _relY > 0.72;
+          _modoGiroZ  = _esBottom || _esTop;
+          _giroZEsTop = _esTop;
           if(_modoGiroZ){
-            _crearIndicadorFondo(modelId);
+            _crearIndicadorFondo(modelId, _giroZEsTop);
             _setPlacaGlow(modelId, true, true);
             _mostrarHint(true);
-            // Pivote = punta superior de la placa en espacio mundo (para péndulo)
-            const _localTop = new THREE.Vector3(
+            // Péndulo: pivot en el extremo opuesto al que se toca
+            const _localPivot = new THREE.Vector3(
               (_lBox.min.x + _lBox.max.x) / 2,
-              _lBox.max.y,
+              _giroZEsTop ? _lBox.min.y : _lBox.max.y,
               (_lBox.min.z + _lBox.max.z) / 2
             );
-            _giroZPivot = modelos[modelId].localToWorld(_localTop);
+            _giroZPivot = modelos[modelId].localToWorld(_localPivot);
           } else {
             _setPlacaGlow(modelId, true, false);
             _mostrarHint(false);
@@ -2796,7 +2801,7 @@ renderer.domElement.addEventListener('pointercancel', e=>{
   if(_ptrMap.size < 2) _prevPinchDist = 0;
   VisorLog.postMessage('pointercancel fired');
   if(_arrastrandoTimer){ clearTimeout(_arrastrandoTimer); _arrastrandoTimer=null; }
-  if(_placaArrastrandoId){ _setPlacaGlow(_placaArrastrandoId, false); _eliminarIndicadorFondo(); _ocultarHint(); _modoGiroZ=false; _giroZPivot=null; controls.enabled=true; _placaArrastrandoId=null; }
+  if(_placaArrastrandoId){ _setPlacaGlow(_placaArrastrandoId, false); _eliminarIndicadorFondo(); _ocultarHint(); _modoGiroZ=false; _giroZEsTop=false; _giroZPivot=null; controls.enabled=true; _placaArrastrandoId=null; }
 });
 renderer.domElement.addEventListener('pointerup', e=>{
   _ptrMap.delete(e.pointerId); _prevPtr.delete(e.pointerId);
@@ -2807,6 +2812,7 @@ renderer.domElement.addEventListener('pointerup', e=>{
     _eliminarIndicadorFondo();
     _ocultarHint();
     _modoGiroZ = false;
+    _giroZEsTop = false;
     _giroZPivot = null;
     controls.enabled=true;
     PlacaArrastrando.postMessage(JSON.stringify({id:_placaArrastrandoId,active:false}));
