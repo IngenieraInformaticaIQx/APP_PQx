@@ -2822,9 +2822,7 @@ function _ejecutarColisionCheck(modelId){
 }
 
 function _actualizarOverlayColision(modelId){
-  if(_colCheckPending) return;
-  _colCheckPending = true;
-  setTimeout(()=>_ejecutarColisionCheck(modelId), 150);
+  // Desactivado temporalmente
 }
 
 renderer.domElement.addEventListener('pointerdown', e=>{
