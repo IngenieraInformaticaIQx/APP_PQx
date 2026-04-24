@@ -173,6 +173,29 @@ class Nota3D {
           this.visible = true});
 }
 
+class _DesplazamientoPlaca {
+  final double horizontalMm;
+  final double verticalMm;
+  final double profundidadMm;
+  final double penduloVerticalDeg;
+  final double penduloLateralDeg;
+
+  const _DesplazamientoPlaca({
+    this.horizontalMm = 0,
+    this.verticalMm = 0,
+    this.profundidadMm = 0,
+    this.penduloVerticalDeg = 0,
+    this.penduloLateralDeg = 0,
+  });
+
+  bool get tieneDesplazamiento =>
+      horizontalMm.abs() > 0.05 ||
+      verticalMm.abs() > 0.05 ||
+      profundidadMm.abs() > 0.05 ||
+      penduloVerticalDeg.abs() > 0.05 ||
+      penduloLateralDeg.abs() > 0.05;
+}
+
 class TornilloColocado {
   final String instanceId;
   final String glbId;
@@ -346,6 +369,11 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
 
   // Arrastrar placa
   bool _placaArrastrandoActiva = false;
+  _DesplazamientoPlaca _placaDesplazamiento = const _DesplazamientoPlaca();
+  double _medidasPanelTopOffset = -1.0;
+  double _medidasPanelLeftOffset = -1.0;
+  bool _medidasPanelArrastrando = false;
+  Offset _medidasPanelDragLastPos = Offset.zero;
 
   // Regla libre / mediciones
   bool   _modoRegla       = false;
@@ -366,6 +394,30 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
     if (_visorListo) {
       _jsRun('window.visor.setBackground(${AppTheme.isDark.value});');
     }
+  }
+
+  void _actualizarEstadoPlacaArrastrando(String raw, {bool haptics = false}) {
+    if (!mounted) return;
+    try {
+      final d = jsonDecode(raw) as Map<String, dynamic>;
+      final activa = d['active'] == true;
+      final desplazamiento = _DesplazamientoPlaca(
+        horizontalMm: (d['dx'] as num?)?.toDouble() ?? 0,
+        verticalMm: (d['dy'] as num?)?.toDouble() ?? 0,
+        profundidadMm: (d['dz'] as num?)?.toDouble() ?? 0,
+        penduloVerticalDeg: (d['rotV'] as num?)?.toDouble() ?? 0,
+        penduloLateralDeg: (d['rotL'] as num?)?.toDouble() ?? 0,
+      );
+
+      if (haptics && activa && !_placaArrastrandoActiva) {
+        HapticFeedback.lightImpact();
+      }
+
+      setState(() {
+        _placaArrastrandoActiva = activa;
+        _placaDesplazamiento = desplazamiento;
+      });
+    } catch (_) {}
   }
 
   @override
@@ -588,11 +640,7 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
             });
           } catch (_) {}
         })..addJavaScriptChannel('PlacaArrastrando', onMessageReceived: (msg) {
-          if (!mounted) return;
-          try {
-            final d = jsonDecode(msg.message) as Map<String, dynamic>;
-            setState(() => _placaArrastrandoActiva = d['active'] == true);
-          } catch (_) {}
+          _actualizarEstadoPlacaArrastrando(msg.message);
         })
 
         ..loadHtmlString(_patchHtmlTheme(_buildHtml()));
@@ -1498,15 +1546,22 @@ function _moverPlacaProfundidad(id, delta){
   // de vuelta. El plano tiene normal = -dir, así que moverlo delta en dir
   // equivale a sumar delta a la constante (d_new = d - n·(delta·dir) = d + delta).
   if(_placaArrastrandoId === id) _planoArrastre.constant += delta;
+  _actualizarHuellaOrigen(id);
+  _postPlacaArrastrando(id, true);
   needsRender = true;
 }
 function _rotarAlrededorCentro(modelo, axis, angle){
-  if(!_placaCenter){ modelo.rotateOnWorldAxis(axis, angle); return; }
+  if(!_placaCenter){
+    modelo.rotateOnWorldAxis(axis, angle);
+    if(modelo.userData && modelo.userData.glbId) _actualizarHuellaOrigen(modelo.userData.glbId);
+    return;
+  }
   const a = axis.clone().normalize();
   const offset = modelo.position.clone().sub(_placaCenter);
   offset.applyAxisAngle(a, angle);
   modelo.position.copy(_placaCenter.clone().add(offset));
   modelo.rotateOnWorldAxis(a, angle);
+  if(modelo.userData && modelo.userData.glbId) _actualizarHuellaOrigen(modelo.userData.glbId);
 }
 
 // Glow de borde con OutlinePass — outline correcto sobre el mesh real
@@ -1595,6 +1650,113 @@ function _eliminarIndicadorFondo(){
     _indicadorFondoMesh = null;
     needsRender = true;
   }
+}
+
+function _disposeHuellaOrigen(ref){
+  if(!ref) return;
+  ref.traverse(c=>{
+    if(c.geometry) c.geometry.dispose();
+    if(c.material){
+      if(Array.isArray(c.material)) c.material.forEach(m=>m.dispose());
+      else c.material.dispose();
+    }
+  });
+  if(ref.parent) ref.parent.remove(ref);
+}
+
+function _crearHuellaOrigen(id, modelo){
+  if(!modelo || modelo.userData.esHueso) return;
+  if(modelo.userData.huellaOrigenRef){
+    _disposeHuellaOrigen(modelo.userData.huellaOrigenRef);
+    modelo.userData.huellaOrigenRef = null;
+  }
+  const ref = modelo.clone(true);
+  ref.name = 'huella_origen_' + id;
+  ref.visible = false;
+  let tieneMeshes = false;
+  ref.traverse(c=>{
+    c.raycast = ()=>null;
+    if(c.userData.esTrayectoria || c.userData.esTornillo){
+      c.visible = false;
+      return;
+    }
+    if(!c.isMesh) return;
+    tieneMeshes = true;
+    c.material = new THREE.MeshBasicMaterial({
+      color: 0x1565C0,
+      transparent: true,
+      opacity: 0.22,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    c.renderOrder = 5;
+    c.material.polygonOffset = true;
+    c.material.polygonOffsetFactor = 1;
+    c.material.polygonOffsetUnits = 1;
+    c.userData.esHuellaOrigen = true;
+  });
+  if(!tieneMeshes){
+    _disposeHuellaOrigen(ref);
+    return;
+  }
+  ref.position.copy(modelo.position);
+  ref.quaternion.copy(modelo.quaternion);
+  ref.scale.copy(modelo.scale);
+  scene.add(ref);
+  modelo.userData.huellaOrigenRef = ref;
+}
+
+function _actualizarHuellaOrigen(id){
+  const modelo = modelos[id];
+  if(!modelo || modelo.userData.esHueso) return;
+  const ref = modelo.userData.huellaOrigenRef;
+  const origPos = modelo.userData.origPos;
+  const origQuat = modelo.userData.origQuat;
+  if(!ref || !origPos || !origQuat) return;
+  const moved =
+    modelo.position.distanceToSquared(origPos) > 1e-6 ||
+    1 - Math.abs(modelo.quaternion.dot(origQuat)) > 1e-6;
+  ref.visible = modelo.visible && moved;
+  needsRender = true;
+}
+
+function _postPlacaArrastrando(id, active, extra){
+  const payload = { id:id, active:active };
+  const modelo = modelos[id];
+  if(modelo && modelo.userData && modelo.userData.origPos){
+    const delta = modelo.position.clone().sub(modelo.userData.origPos);
+    const camRight = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0).normalize();
+    const camUp = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 1).normalize();
+    const camFwd = camera.getWorldDirection(new THREE.Vector3()).normalize();
+    payload.dx = Math.round(delta.dot(camRight) * 10) / 10;
+    payload.dy = Math.round(delta.dot(camUp) * 10) / 10;
+    payload.dz = Math.round(delta.dot(camFwd) * 10) / 10;
+    if(modelo.userData.origQuat){
+      const origQuat = modelo.userData.origQuat.clone();
+      const origUp = new THREE.Vector3(0,1,0).applyQuaternion(origQuat).normalize();
+      const curUp = new THREE.Vector3(0,1,0).applyQuaternion(modelo.quaternion).normalize();
+      const origRight = new THREE.Vector3(1,0,0).applyQuaternion(origQuat).normalize();
+      const curRight = new THREE.Vector3(1,0,0).applyQuaternion(modelo.quaternion).normalize();
+      payload.rotV = Math.round(_signedAngleOnAxis(origUp, curUp, camFwd) * 10) / 10;
+      payload.rotL = Math.round(_signedAngleOnAxis(origRight, curRight, camUp) * 10) / 10;
+    } else {
+      payload.rotV = 0; payload.rotL = 0;
+    }
+  } else {
+    payload.dx = 0; payload.dy = 0; payload.dz = 0;
+    payload.rotV = 0; payload.rotL = 0;
+  }
+  if(extra) Object.assign(payload, extra);
+  PlacaArrastrando.postMessage(JSON.stringify(payload));
+}
+
+function _signedAngleOnAxis(fromVec, toVec, axis){
+  const a = fromVec.clone().projectOnPlane(axis).normalize();
+  const b = toVec.clone().projectOnPlane(axis).normalize();
+  if(a.lengthSq() < 1e-8 || b.lengthSq() < 1e-8) return 0;
+  const cross = new THREE.Vector3().crossVectors(a, b);
+  const dot = THREE.MathUtils.clamp(a.dot(b), -1, 1);
+  return Math.atan2(cross.dot(axis.clone().normalize()), dot) * 180 / Math.PI;
 }
 
 function snapTrayectoriaMasCercana(hitPoint){
@@ -1720,6 +1882,7 @@ function cargarGlbBase64(id, b64){
     modelos[id].traverse(c=>{
       if(c.isMesh && !c.userData.esTrayectoria) c.visible = true;
     });
+    _actualizarHuellaOrigen(id);
     needsRender = true;
     return;
   }
@@ -1821,7 +1984,12 @@ function cargarGlbBase64(id, b64){
       });
       if(esHueso) gltf.scene.userData.esHueso=true;
       scene.add(gltf.scene);
+      gltf.scene.userData.glbId = id;
+      gltf.scene.userData.origPos = gltf.scene.position.clone();
+      gltf.scene.userData.origQuat = gltf.scene.quaternion.clone();
       modelos[id]=gltf.scene;
+      if(!esHueso) _crearHuellaOrigen(id, gltf.scene);
+      _actualizarHuellaOrigen(id);
       _invalidarCacheMeshes(); // el nuevo modelo cambia la escena
       if(Object.keys(modelos).length===1){
         const box=new THREE.Box3().setFromObject(gltf.scene);
@@ -2172,6 +2340,7 @@ function toggleGlb(id,v){
       if(c.isMesh && !c.userData.esTrayectoria) c.visible = false;
     });
   }
+  _actualizarHuellaOrigen(id);
   _invalidarCacheMeshes();
 }
 function toggleGuias(v){
@@ -2515,6 +2684,10 @@ function limpiarTodo(){
     if(obj.userData.instanceId && String(obj.userData.instanceId).startsWith('screw_')){
       delete modelos[id]; continue; // ya se elimina al quitar la placa padre
     }
+    if(obj.userData.huellaOrigenRef){
+      _disposeHuellaOrigen(obj.userData.huellaOrigenRef);
+      obj.userData.huellaOrigenRef = null;
+    }
     obj.removeFromParent();
     obj.traverse(c=>{
       if(c.geometry) c.geometry.dispose();
@@ -2706,7 +2879,7 @@ function _tryActivateDrag(screenX, screenY){
     _setPlacaGlow(modelId, true, false);
     _mostrarHint(false);
   }
-  PlacaArrastrando.postMessage(JSON.stringify({id:modelId,active:true}));
+  _postPlacaArrastrando(modelId, true);
 }
 
 // ── Colisión placa-hueso: overlay rojo en zona de intersección ───────────────
@@ -2931,6 +3104,7 @@ renderer.domElement.addEventListener('pointermove', e=>{
       modelo.position.addScaledVector(camRight,  dMidX * scr2world);
       modelo.position.addScaledVector(camUp,    -dMidY * scr2world);
       if(_placaCenter){ _placaCenter.addScaledVector(camRight, dMidX * scr2world); _placaCenter.addScaledVector(camUp, -dMidY * scr2world); }
+      _postPlacaArrastrando(_placaArrastrandoId, true);
     }
 
     // Profundidad: pinch (distancia entre dedos)
@@ -2945,10 +3119,10 @@ renderer.domElement.addEventListener('pointermove', e=>{
     const f0dx = pts[0].x - prevPts[0].x - dMidX;
     const f0dy = pts[0].y - prevPts[0].y - dMidY;
     const sensibilidad = 0.0014;
-    const camRight2 = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0).normalize();
+    const localRight2 = new THREE.Vector3(1,0,0).transformDirection(modelo.matrixWorld).normalize();
     const localUp2 = new THREE.Vector3(0,1,0).transformDirection(modelo.matrixWorld).normalize();
     _rotarAlrededorCentro(modelo, localUp2, f0dx * sensibilidad);
-    _rotarAlrededorCentro(modelo, camRight2, f0dy * sensibilidad);
+    _rotarAlrededorCentro(modelo, localRight2, f0dy * sensibilidad);
 
     needsRender = true;
   } else if(modoRotar && (e.buttons & 2)){
@@ -2964,6 +3138,7 @@ renderer.domElement.addEventListener('pointermove', e=>{
     const localUp = new THREE.Vector3(0,1,0).transformDirection(modelo.matrixWorld).normalize();
     _rotarAlrededorCentro(modelo, localUp, dx * sensibilidad);
     _rotarAlrededorCentro(modelo, camRight, dy * sensibilidad);
+    _postPlacaArrastrando(_placaArrastrandoId, true);
     needsRender = true;
   } else if(e.buttons & 1 || _ptrMap.size === 1){
     if(_modoGiroZ){
@@ -2980,6 +3155,8 @@ renderer.domElement.addEventListener('pointermove', e=>{
         modelo.position.copy(_giroZPivot.clone().add(toModel));
         if(_placaCenter){ const tc = _placaCenter.clone().sub(_giroZPivot); tc.applyQuaternion(quat); _placaCenter.copy(_giroZPivot.clone().add(tc)); }
         modelo.rotateOnWorldAxis(camFwd, angle);
+        _actualizarHuellaOrigen(_placaArrastrandoId);
+        _postPlacaArrastrando(_placaArrastrandoId, true);
         needsRender = true;
       }
     } else if(_modoGiroY){
@@ -2996,6 +3173,8 @@ renderer.domElement.addEventListener('pointermove', e=>{
         modelo.position.copy(_giroYPivot.clone().add(toModel));
         if(_placaCenter){ const tc = _placaCenter.clone().sub(_giroYPivot); tc.applyQuaternion(quat); _placaCenter.copy(_giroYPivot.clone().add(tc)); }
         modelo.rotateOnWorldAxis(camUp, angle);
+        _actualizarHuellaOrigen(_placaArrastrandoId);
+        _postPlacaArrastrando(_placaArrastrandoId, true);
         needsRender = true;
       }
     } else {
@@ -3008,6 +3187,8 @@ renderer.domElement.addEventListener('pointermove', e=>{
         const newPos = _arrastreTarget.clone().sub(_arrastreOffset);
         if(_placaCenter) _placaCenter.add(newPos.clone().sub(modelo.position));
         modelo.position.copy(newPos);
+        _actualizarHuellaOrigen(_placaArrastrandoId);
+        _postPlacaArrastrando(_placaArrastrandoId, true);
         needsRender = true;
       }
     }
@@ -3048,7 +3229,7 @@ renderer.domElement.addEventListener('pointerup', e=>{
     _modoGiroY = false; _giroYEsLeft = false; _giroYPivot = null;
     _placaCenter = null;
     controls.enabled=true;
-    PlacaArrastrando.postMessage(JSON.stringify({id:_placaArrastrandoId,active:false}));
+    _postPlacaArrastrando(_placaArrastrandoId, false);
     _placaArrastrandoId=null;
     return;
   }
@@ -3106,10 +3287,11 @@ renderer.domElement.addEventListener('pointerup', e=>{
       }
       if(tappedId && tappedId===_dblTapModelId && nowDt-_dblTapTime<350){
         // Reset placa a origen — tornillos (hijos) vuelven a sus posiciones locales originales
-        modelos[tappedId].position.set(0,0,0);
-        modelos[tappedId].quaternion.set(0,0,0,1);
+        modelos[tappedId].position.copy(modelos[tappedId].userData.origPos || new THREE.Vector3());
+        modelos[tappedId].quaternion.copy(modelos[tappedId].userData.origQuat || new THREE.Quaternion());
+        _actualizarHuellaOrigen(tappedId);
         needsRender=true; _dblTapModelId=null; _dblTapTime=0;
-        PlacaArrastrando.postMessage(JSON.stringify({id:tappedId,active:false,reset:true}));
+        _postPlacaArrastrando(tappedId, false, { reset:true });
         return;
       }
       _dblTapModelId = tappedId; _dblTapTime = nowDt;
@@ -3284,7 +3466,7 @@ function _finishPlacaDrag(){
   _modoGiroY=false; _giroYEsLeft=false; _giroYPivot=null;
   _placaCenter=null;
   controls.enabled=true;
-  PlacaArrastrando.postMessage(JSON.stringify({id:_placaArrastrandoId,active:false}));
+  _postPlacaArrastrando(_placaArrastrandoId, false);
   _placaArrastrandoId=null;
 }
 
@@ -3305,6 +3487,8 @@ function _handleSingleTouchDrag(curTouch, prevTouch, modelo){
         _placaCenter.copy(_giroZPivot.clone().add(tc));
       }
       modelo.rotateOnWorldAxis(camFwd, angle);
+      _actualizarHuellaOrigen(_placaArrastrandoId);
+      _postPlacaArrastrando(_placaArrastrandoId, true);
       needsRender = true;
     }
     return;
@@ -3326,6 +3510,8 @@ function _handleSingleTouchDrag(curTouch, prevTouch, modelo){
         _placaCenter.copy(_giroYPivot.clone().add(tc));
       }
       modelo.rotateOnWorldAxis(camUp, angle);
+      _actualizarHuellaOrigen(_placaArrastrandoId);
+      _postPlacaArrastrando(_placaArrastrandoId, true);
       needsRender = true;
     }
     return;
@@ -3340,6 +3526,8 @@ function _handleSingleTouchDrag(curTouch, prevTouch, modelo){
     const newPos = _tgt.clone().sub(_arrastreOffset);
     if(_placaCenter) _placaCenter.add(newPos.clone().sub(modelo.position));
     modelo.position.copy(newPos);
+    if(_placaArrastrandoId) _actualizarHuellaOrigen(_placaArrastrandoId);
+    if(_placaArrastrandoId) _postPlacaArrastrando(_placaArrastrandoId, true);
     needsRender = true;
   }
 }
@@ -3366,6 +3554,7 @@ function _handleMultiTouchDrag(curTouches, modelo){
       _placaCenter.addScaledVector(camRight, dMidX * scr2world);
       _placaCenter.addScaledVector(camUp, -dMidY * scr2world);
     }
+    _postPlacaArrastrando(_placaArrastrandoId, true);
   }
 
   const distCur = Math.hypot(curTouches[1].x-curTouches[0].x, curTouches[1].y-curTouches[0].y);
@@ -3377,10 +3566,10 @@ function _handleMultiTouchDrag(curTouches, modelo){
   const f0dx = curTouches[0].x - prevTouches[0].x - dMidX;
   const f0dy = curTouches[0].y - prevTouches[0].y - dMidY;
   const sensibilidad = 0.0014;
-  const camRight2 = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0).normalize();
+  const localRight2 = new THREE.Vector3(1,0,0).transformDirection(modelo.matrixWorld).normalize();
   const localUp2 = new THREE.Vector3(0,1,0).transformDirection(modelo.matrixWorld).normalize();
   _rotarAlrededorCentro(modelo, localUp2, f0dx * sensibilidad);
-  _rotarAlrededorCentro(modelo, camRight2, f0dy * sensibilidad);
+  _rotarAlrededorCentro(modelo, localRight2, f0dy * sensibilidad);
   needsRender = true;
 }
 
@@ -3606,19 +3795,7 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
                           } catch (_) {}
                         },
                   onPlacaArrastrando: (msg) {
-                    if (!mounted) return;
-
-                    try {
-                      final d = jsonDecode(msg) as Map<String, dynamic>;
-                      final activa = d['active'] == true;
-
-                      if (activa && !_placaArrastrandoActiva) {
-                        HapticFeedback.lightImpact();
-                      }
-
-                      setState(() => _placaArrastrandoActiva = activa);
-
-                    } catch (_) {}
+                    _actualizarEstadoPlacaArrastrando(msg, haptics: true);
                   },
                       )
                     : WebViewWidget(
@@ -3669,6 +3846,8 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
                 ),
               ),
             _buildPanelLateral(),
+            if (_placaArrastrandoActiva || _placaDesplazamiento.tieneDesplazamiento)
+              _buildPanelMedidasFlotante(),
             // Hint inferior
             Positioned(
               bottom: 16, left: 0, right: 0,
@@ -6255,6 +6434,238 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
 
   Widget _marqueeText(String text, TextStyle style) =>
       _MarqueeText(text: text, style: style);
+
+  Widget _buildPlacaDesplazamientoPanel() {
+    final azul = const Color(0xFF2A7FF5);
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(18),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
+        child: Container(
+          width: 228,
+          padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+          decoration: BoxDecoration(
+            color: AppTheme.cardBg1,
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: AppTheme.cardBorder, width: 1.2),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.08),
+                blurRadius: 12,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(children: [
+                Icon(Icons.straighten, size: 13, color: azul),
+                const SizedBox(width: 6),
+                Text(
+                  'MEDIDAS DE PLACA',
+                  style: TextStyle(
+                    color: azul,
+                    fontSize: 9.5,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.8,
+                  ),
+                ),
+              ]),
+              const SizedBox(height: 8),
+              Text(
+                'Posición',
+                style: TextStyle(
+                  color: AppTheme.subtitleColor,
+                  fontSize: 9.5,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 6),
+              _buildPlacaDesplazamientoRow(
+                'Horizontal',
+                _placaDesplazamiento.horizontalMm,
+                unidad: 'mm',
+              ),
+              const SizedBox(height: 6),
+              _buildPlacaDesplazamientoRow(
+                'Vertical',
+                _placaDesplazamiento.verticalMm,
+                unidad: 'mm',
+              ),
+              const SizedBox(height: 6),
+              _buildPlacaDesplazamientoRow(
+                'Profundidad',
+                _placaDesplazamiento.profundidadMm,
+                unidad: 'mm',
+              ),
+              const SizedBox(height: 10),
+              Text(
+                'Inclinación',
+                style: TextStyle(
+                  color: AppTheme.subtitleColor,
+                  fontSize: 9.5,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 6),
+              _buildPlacaAnguloRow(
+                'Péndulo vertical',
+                _placaDesplazamiento.penduloVerticalDeg,
+              ),
+              const SizedBox(height: 6),
+              _buildPlacaAnguloRow(
+                'Péndulo lateral',
+                _placaDesplazamiento.penduloLateralDeg,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPlacaAnguloRow(
+    String nombre,
+    double valor,
+  ) {
+    final color = valor.abs() < 0.05
+        ? AppTheme.subtitleColor
+        : const Color(0xFF2A7FF5);
+    final dir = valor >= 0 ? '+' : '-';
+    return Row(
+      children: [
+        SizedBox(
+          width: 78,
+          child: Text(
+            nombre,
+            style: TextStyle(
+              color: AppTheme.subtitleColor,
+              fontSize: 10,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+        Expanded(
+          child: Text(
+            '$dir  ${valor.abs().toStringAsFixed(1)}°',
+            textAlign: TextAlign.right,
+            style: TextStyle(
+              color: color,
+              fontSize: 10.5,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildPanelMedidasFlotante() {
+    final size = MediaQuery.of(context).size;
+    final padding = MediaQuery.of(context).padding;
+    const panelWidth = 228.0;
+    const estimatedHeight = 196.0;
+
+    if (_medidasPanelLeftOffset < 0) {
+      _medidasPanelLeftOffset = 14;
+    }
+    if (_medidasPanelTopOffset < 0) {
+      _medidasPanelTopOffset = (size.height - estimatedHeight - 92)
+          .clamp(padding.top + 72.0, size.height - estimatedHeight - 16.0);
+    }
+
+    return Positioned(
+      top: _medidasPanelTopOffset,
+      left: _medidasPanelLeftOffset,
+      child: GestureDetector(
+        onLongPressStart: (d) {
+          HapticFeedback.mediumImpact();
+          setState(() {
+            _medidasPanelArrastrando = true;
+            _medidasPanelDragLastPos = d.globalPosition;
+          });
+        },
+        onLongPressMoveUpdate: (d) {
+          if (!_medidasPanelArrastrando) return;
+          final delta = d.globalPosition - _medidasPanelDragLastPos;
+          setState(() {
+            _medidasPanelDragLastPos = d.globalPosition;
+            _medidasPanelTopOffset = (_medidasPanelTopOffset + delta.dy).clamp(
+              padding.top + 72.0,
+              size.height - estimatedHeight - 16.0,
+            );
+            _medidasPanelLeftOffset = (_medidasPanelLeftOffset + delta.dx).clamp(
+              8.0,
+              size.width - panelWidth - 8.0,
+            );
+          });
+        },
+        onLongPressEnd: (_) {
+          HapticFeedback.lightImpact();
+          setState(() => _medidasPanelArrastrando = false);
+        },
+        onLongPressCancel: () => setState(() => _medidasPanelArrastrando = false),
+        onDoubleTap: () {
+          HapticFeedback.lightImpact();
+          setState(() {
+            _medidasPanelTopOffset = (size.height - estimatedHeight - 92)
+                .clamp(padding.top + 72.0, size.height - estimatedHeight - 16.0);
+            _medidasPanelLeftOffset = 14;
+          });
+        },
+        behavior: HitTestBehavior.opaque,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(18),
+            boxShadow: _medidasPanelArrastrando
+                ? [BoxShadow(color: const Color(0xFF2A7FF5).withOpacity(0.28), blurRadius: 24, offset: const Offset(0, 8))]
+                : [BoxShadow(color: Colors.black.withOpacity(0.08), blurRadius: 12, offset: const Offset(0, 4))],
+          ),
+          child: _buildPlacaDesplazamientoPanel(),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPlacaDesplazamientoRow(
+    String nombre,
+    double valor, {
+    required String unidad,
+  }) {
+    final color = valor.abs() < 0.05
+        ? AppTheme.subtitleColor
+        : const Color(0xFF2A7FF5);
+    final dir = valor >= 0 ? '+' : '-';
+    return Row(
+      children: [
+        SizedBox(
+          width: 78,
+          child: Text(
+            nombre,
+            style: TextStyle(
+              color: AppTheme.subtitleColor,
+              fontSize: 10,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+        Expanded(
+          child: Text(
+            '$dir ${valor.abs().toStringAsFixed(1)} $unidad',
+            textAlign: TextAlign.right,
+            style: TextStyle(
+              color: color,
+              fontSize: 10.5,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
 
   Widget _glassChip({required Widget child}) {
     return ClipRRect(
