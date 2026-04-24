@@ -2019,8 +2019,6 @@ tornilloScene.position.copy(hitPoint)
     cilindroId: d.cilindroId || '',
   }));
 
-  // Crear regla 3D al lado del tornillo (texto viene del nombre desde Flutter)
-  _crearRegla(d.instanceId, tornilloScene, largoReal, d.nombre);
   VisorLog.postMessage('Insertado: '+d.instanceId+' en pos='+tornilloScene.position.x.toFixed(1)+','+tornilloScene.position.y.toFixed(1)+','+tornilloScene.position.z.toFixed(1));
 }
 
@@ -3861,16 +3859,16 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
             if (_planoCortando) _buildPanelCorte(),
             // Popup de selección de tornillo
             if (_tapPendiente != null) _buildScrewPopup(context),
-            // Etiqueta info tornillo — oculta temporalmente
-            // if (_screwInfoTc != null) ...[
-            //   Positioned.fill(
-            //     child: GestureDetector(
-            //       behavior: HitTestBehavior.translucent,
-            //       onTap: () => setState(() => _screwInfoTc = null),
-            //     ),
-            //   ),
-            //   _buildScrewInfoLabel(context),
-            // ],
+            // Etiqueta info tornillo al tocar un tornillo ya colocado
+            if (_screwInfoTc != null) ...[
+              Positioned.fill(
+                child: GestureDetector(
+                  behavior: HitTestBehavior.translucent,
+                  onTap: () => setState(() => _screwInfoTc = null),
+                ),
+              ),
+              _buildScrewInfoLabel(context),
+            ],
           ]),
         ),
       ),
