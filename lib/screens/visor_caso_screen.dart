@@ -3249,15 +3249,13 @@ document.addEventListener('selectionchange', () => { try{ window.getSelection().
 const _isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent) ||
                (/MacIntel|MacARM/.test(navigator.platform) && navigator.maxTouchPoints > 1) ||
                (navigator.vendor === 'Apple Computer, Inc.' && 'ontouchstart' in window);
-if(_isIOS){
-  document.addEventListener('touchstart', e => e.preventDefault(), {passive: false});
-}
 // Pinch de profundidad + traslación táctil (passive=true)
 let _prevPinchDistTouch = 0;
 // Timer de respaldo para activar arrastre de placa vía touch events.
 // A diferencia de _arrastrandoTimer (pointer), éste NO se cancela en pointercancel,
 // lo que permite que iOS active el arrastre aunque su reconocedor nativo dispare pointercancel.
 renderer.domElement.addEventListener('touchstart', e=>{
+  if(_isIOS) e.preventDefault();
   if(e.touches.length === 2 && _touchDragTimer){ clearTimeout(_touchDragTimer); _touchDragTimer=null; }
   if(e.touches.length !== 1 || _modoNotaActivo || _placaArrastrandoId) return;
   const t = e.touches[0];
@@ -3268,8 +3266,9 @@ renderer.domElement.addEventListener('touchstart', e=>{
     if(_placaArrastrandoId) return; // ya activado por otro camino
     _tryActivateDrag(_touchDragStartX, _touchDragStartY);
   }, 600);
-}, {passive:true});
+}, {passive:false});
 renderer.domElement.addEventListener('touchmove', e=>{
+  if(_isIOS && (_placaArrastrandoId || _touchDragTimer || e.touches.length > 1)) e.preventDefault();
   // Cancelar timer táctil si el dedo se ha movido demasiado (el usuario hace scroll/pan)
   if(_touchDragTimer && e.touches.length === 1){
     const t = e.touches[0];
@@ -3300,8 +3299,9 @@ renderer.domElement.addEventListener('touchmove', e=>{
     if(_prevPinchDistTouch > 0) _moverPlacaProfundidad(_placaArrastrandoId, (d-_prevPinchDistTouch)*0.0065);
     _prevPinchDistTouch = d;
   }
-}, {passive:true});
+}, {passive:false});
 renderer.domElement.addEventListener('touchend', e=>{
+  if(_isIOS) e.preventDefault();
   if(e.touches.length<2) _prevPinchDistTouch=0;
   if(_arrastrandoTimer){ clearTimeout(_arrastrandoTimer); _arrastrandoTimer=null; }
   if(_touchDragTimer){ clearTimeout(_touchDragTimer); _touchDragTimer=null; }
@@ -3312,11 +3312,12 @@ renderer.domElement.addEventListener('touchend', e=>{
     PlacaArrastrando.postMessage(JSON.stringify({id:_placaArrastrandoId,active:false}));
     _placaArrastrandoId=null;
   }
-}, {passive:true});
+}, {passive:false});
 renderer.domElement.addEventListener('touchcancel', e=>{
+  if(_isIOS) e.preventDefault();
   _prevPinchDistTouch=0;
   if(_touchDragTimer){ clearTimeout(_touchDragTimer); _touchDragTimer=null; }
-}, {passive:true});
+}, {passive:false});
 animate();
 controls.addEventListener('change', ()=>{ needsRender = true; });
 window.addEventListener('resize',()=>{

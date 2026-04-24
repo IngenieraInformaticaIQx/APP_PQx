@@ -45,19 +45,19 @@ import WebKit
 
       for v in views {
         for gr in v.gestureRecognizers ?? [] {
-          if gr is UILongPressGestureRecognizer ||
-              gr is UITapGestureRecognizer ||
-              gr is UIPanGestureRecognizer {
-            if String(describing: type(of: gr)).contains("Text") ||
-                gr is UILongPressGestureRecognizer {
-              gr.isEnabled = false
-            }
+          let recognizerType = String(describing: type(of: gr))
+          if recognizerType.contains("Text") ||
+              recognizerType.contains("Selection") ||
+              recognizerType.contains("Loupe") ||
+              recognizerType.contains("EditMenu") {
+            gr.isEnabled = false
           }
         }
       }
 
       wkWebView.isUserInteractionEnabled = true
       wkWebView.scrollView.delaysContentTouches = false
+      wkWebView.scrollView.canCancelContentTouches = false
     }
 
     for subview in view.subviews {
