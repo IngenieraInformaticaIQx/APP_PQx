@@ -2585,6 +2585,7 @@ let _placaArrastrandoId = null;
 let _planoArrastre = new THREE.Plane();
 let _arrastreOffset = new THREE.Vector3();
 let _arrastrandoTimer = null;
+let _twoFingerTimer = null;  // tap de 2 dedos con delay para no interferir con pinch
 let _arrastreMaxDist = 0; // máximo desplazamiento durante el timer
 let _lastPointerX = 0, _lastPointerY = 0; // posición actual del puntero
 const _arrastreTarget = new THREE.Vector3(); // buffer reutilizable para intersección
@@ -2702,13 +2703,22 @@ renderer.domElement.addEventListener('pointerdown', e=>{
   // Si ya arrastramos placa: segundo dedo o click derecho → rotación, no reiniciar timer
   if(_placaArrastrandoId) return;
   pointerDownX=e.clientX; pointerDownY=e.clientY;
-  // Tap de 2 dedos sobre placa → activar arrastre inmediatamente (sin long press)
+  // Tap de 2 dedos sobre placa → activar arrastre tras 250 ms si no es pinch
   if(_ptrMap.size === 2 && !_modoNotaActivo){
     if(_arrastrandoTimer){ clearTimeout(_arrastrandoTimer); _arrastrandoTimer=null; }
-    const ptrs = Array.from(_ptrMap.values());
-    const midX = (ptrs[0].x + ptrs[1].x) / 2;
-    const midY = (ptrs[0].y + ptrs[1].y) / 2;
-    _tryActivateDrag(midX, midY);
+    if(_twoFingerTimer){ clearTimeout(_twoFingerTimer); _twoFingerTimer=null; }
+    const ptrs0 = Array.from(_ptrMap.values());
+    const _tapInitDist = Math.hypot(ptrs0[1].x-ptrs0[0].x, ptrs0[1].y-ptrs0[0].y);
+    const _tapMidX = (ptrs0[0].x + ptrs0[1].x) / 2;
+    const _tapMidY = (ptrs0[0].y + ptrs0[1].y) / 2;
+    _twoFingerTimer = setTimeout(()=>{
+      _twoFingerTimer = null;
+      if(_ptrMap.size < 2) return; // dedos ya levantados
+      const curPtrs = Array.from(_ptrMap.values());
+      const curDist = Math.hypot(curPtrs[1].x-curPtrs[0].x, curPtrs[1].y-curPtrs[0].y);
+      if(Math.abs(curDist - _tapInitDist) > 15) return; // está haciendo pinch, no tap
+      _tryActivateDrag(_tapMidX, _tapMidY);
+    }, 250);
     return;
   }
   if(_modoNotaActivo){
@@ -2869,12 +2879,14 @@ renderer.domElement.addEventListener('pointercancel', e=>{
   _ptrMap.delete(e.pointerId); _prevPtr.delete(e.pointerId);
   if(_ptrMap.size < 2) _prevPinchDist = 0;
   VisorLog.postMessage('pointercancel fired');
+  if(_twoFingerTimer){ clearTimeout(_twoFingerTimer); _twoFingerTimer=null; }
   if(_arrastrandoTimer){ clearTimeout(_arrastrandoTimer); _arrastrandoTimer=null; }
   if(_placaArrastrandoId && _ptrMap.size === 0){ _setPlacaGlow(_placaArrastrandoId, false); _eliminarIndicadorFondo(); _ocultarHint(); _modoGiroZ=false; _giroZEsTop=false; _giroZPivot=null; _modoGiroY=false; _giroYEsLeft=false; _giroYPivot=null; _placaCenter=null; controls.enabled=true; _placaArrastrandoId=null; }
 });
 renderer.domElement.addEventListener('pointerup', e=>{
   _ptrMap.delete(e.pointerId); _prevPtr.delete(e.pointerId);
   if(_ptrMap.size < 2) _prevPinchDist = 0;
+  if(_twoFingerTimer){ clearTimeout(_twoFingerTimer); _twoFingerTimer=null; }
   if(_arrastrandoTimer){ clearTimeout(_arrastrandoTimer); _arrastrandoTimer=null; }
   if(_placaArrastrandoId){
     if(_ptrMap.size > 0){ needsRender=true; return; } // queda otro dedo en pantalla
