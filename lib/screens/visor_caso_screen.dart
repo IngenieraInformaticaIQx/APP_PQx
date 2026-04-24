@@ -2743,18 +2743,22 @@ function _eliminarOverlayColision(){
   _colCheckPending = false;
 }
 
+// Raycaster reutilizable para evitar crear objetos en cada llamada
+const _colRc = new THREE.Raycaster();
+const _colDirs = [
+  new THREE.Vector3(1,0.17,0.09).normalize(),
+  new THREE.Vector3(-0.09,1,0.17).normalize(),
+  new THREE.Vector3(0.17,-0.09,1).normalize(),
+];
 function _puntoEnHueso(pt, meshes){
-  // 3 direcciones → mayoría de votos (robusto ante mallas no perfectas)
-  const dirs=[
-    new THREE.Vector3(1,0.17,0.09).normalize(),
-    new THREE.Vector3(-0.09,1,0.17).normalize(),
-    new THREE.Vector3(0.17,-0.09,1).normalize(),
-  ];
-  const rc = new THREE.Raycaster();
   let v=0;
-  for(const d of dirs){ rc.set(pt,d); if(rc.intersectObjects(meshes,false).length%2===1) v++; }
+  for(const d of _colDirs){ _colRc.set(pt,d); if(_colRc.intersectObjects(meshes,false).length%2===1) v++; }
   return v>=2;
 }
+
+// Máximo de triángulos a comprobar por frame. Con mallas grandes se muestrea
+// uniformemente para acotar el tiempo en el hilo principal (evita freeze en Windows).
+const _COL_MAX_TRI = 350;
 
 function _ejecutarColisionCheck(modelId){
   _colCheckPending = false;
@@ -2783,9 +2787,11 @@ function _ejecutarColisionCheck(modelId){
     const pos = src.geometry.attributes.position;
     const idxArr = src.geometry.index?.array ?? null;
     const triCount = idxArr ? idxArr.length/3 : pos.count/3;
+    // Paso de muestreo: si hay más triángulos que el límite, saltar uniformemente
+    const step = Math.max(1, Math.floor(triCount / _COL_MAX_TRI));
     const redIdx = [];
 
-    for(let t=0; t<triCount; t++){
+    for(let t=0; t<triCount; t+=step){
       const i0 = idxArr ? idxArr[t*3]   : t*3;
       const i1 = idxArr ? idxArr[t*3+1] : t*3+1;
       const i2 = idxArr ? idxArr[t*3+2] : t*3+2;
@@ -2794,7 +2800,14 @@ function _ejecutarColisionCheck(modelId){
       _v2.fromBufferAttribute(pos,i2).applyMatrix4(src.matrixWorld);
       _cen.copy(_v0).add(_v1).add(_v2).divideScalar(3);
       if(!boneBbox.containsPoint(_cen)) continue; // pre-filtro O(1)
-      if(_puntoEnHueso(_cen, huesoMeshes)) redIdx.push(i0,i1,i2);
+      if(_puntoEnHueso(_cen, huesoMeshes)){
+        // Añadir el triángulo y sus vecinos inmediatos para cubrir los huecos del muestreo
+        redIdx.push(i0,i1,i2);
+        if(step>1 && t+1<triCount){
+          const j=t+1;
+          redIdx.push(idxArr?idxArr[j*3]:j*3, idxArr?idxArr[j*3+1]:j*3+1, idxArr?idxArr[j*3+2]:j*3+2);
+        }
+      }
     }
 
     if(redIdx.length){
