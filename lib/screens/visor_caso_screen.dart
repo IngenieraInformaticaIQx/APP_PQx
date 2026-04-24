@@ -1493,6 +1493,11 @@ function _moverPlacaProfundidad(id, delta){
   const dir = camera.getWorldDirection(new THREE.Vector3());
   modelos[id].position.addScaledVector(dir, delta);
   if(_placaCenter) _placaCenter.addScaledVector(dir, delta);
+  // Mantener _planoArrastre sincronizado con la nueva posición de la placa.
+  // Sin esto, el siguiente pointermove intersecta el plano viejo y snapea la placa
+  // de vuelta. El plano tiene normal = -dir, así que moverlo delta en dir
+  // equivale a sumar delta a la constante (d_new = d - n·(delta·dir) = d + delta).
+  if(_placaArrastrandoId === id) _planoArrastre.constant += delta;
   needsRender = true;
 }
 function _rotarAlrededorCentro(modelo, axis, angle){
