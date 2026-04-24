@@ -3223,15 +3223,156 @@ document.addEventListener('selectionchange', () => { try{ window.getSelection().
 const _isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent) ||
                (/MacIntel|MacARM/.test(navigator.platform) && navigator.maxTouchPoints > 1) ||
                (navigator.vendor === 'Apple Computer, Inc.' && 'ontouchstart' in window);
-// Pinch de profundidad + traslación táctil (passive=true)
+// Estado táctil iOS de respaldo para cuando WKWebView cancela pointer events.
 let _prevPinchDistTouch = 0;
+let _prevTouchSnapshot = [];
+let _touchTwoFingerStart = null;
+
+function _snapshotTouches(touches){
+  return Array.from(touches).map(t => ({ id: t.identifier, x: t.clientX, y: t.clientY }));
+}
+
+function _findPrevTouch(id, fallback){
+  return _prevTouchSnapshot.find(t => t.id === id) || fallback;
+}
+
+function _finishPlacaDrag(){
+  if(!_placaArrastrandoId) return;
+  _setPlacaGlow(_placaArrastrandoId,false);
+  _eliminarIndicadorFondo();
+  _ocultarHint();
+  _eliminarOverlayColision();
+  _modoGiroZ=false; _giroZEsTop=false; _giroZPivot=null;
+  _modoGiroY=false; _giroYEsLeft=false; _giroYPivot=null;
+  _placaCenter=null;
+  controls.enabled=true;
+  PlacaArrastrando.postMessage(JSON.stringify({id:_placaArrastrandoId,active:false}));
+  _placaArrastrandoId=null;
+}
+
+function _handleSingleTouchDrag(curTouch, prevTouch, modelo){
+  if(_modoGiroZ){
+    if(prevTouch && _giroZPivot){
+      const dx = curTouch.x - prevTouch.x;
+      const sensibilidad = 0.00067;
+      const angle = (_giroZEsTop ? 1 : -1) * dx * sensibilidad;
+      const camFwd = camera.getWorldDirection(new THREE.Vector3());
+      const quat = new THREE.Quaternion().setFromAxisAngle(camFwd, angle);
+      const toModel = modelo.position.clone().sub(_giroZPivot);
+      toModel.applyQuaternion(quat);
+      modelo.position.copy(_giroZPivot.clone().add(toModel));
+      if(_placaCenter){
+        const tc = _placaCenter.clone().sub(_giroZPivot);
+        tc.applyQuaternion(quat);
+        _placaCenter.copy(_giroZPivot.clone().add(tc));
+      }
+      modelo.rotateOnWorldAxis(camFwd, angle);
+      needsRender = true;
+    }
+    return;
+  }
+
+  if(_modoGiroY){
+    if(prevTouch && _giroYPivot){
+      const dx = curTouch.x - prevTouch.x;
+      const sensibilidad = 0.00067;
+      const angle = (_giroYEsLeft ? 1 : -1) * dx * sensibilidad;
+      const camUp = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 1).normalize();
+      const quat = new THREE.Quaternion().setFromAxisAngle(camUp, angle);
+      const toModel = modelo.position.clone().sub(_giroYPivot);
+      toModel.applyQuaternion(quat);
+      modelo.position.copy(_giroYPivot.clone().add(toModel));
+      if(_placaCenter){
+        const tc = _placaCenter.clone().sub(_giroYPivot);
+        tc.applyQuaternion(quat);
+        _placaCenter.copy(_giroYPivot.clone().add(tc));
+      }
+      modelo.rotateOnWorldAxis(camUp, angle);
+      needsRender = true;
+    }
+    return;
+  }
+
+  const rect = renderer.domElement.getBoundingClientRect();
+  const px = ((curTouch.x-rect.left)/rect.width)*2-1;
+  const py = -((curTouch.y-rect.top)/rect.height)*2+1;
+  raycaster.setFromCamera({x:px,y:py}, camera);
+  const _tgt = new THREE.Vector3();
+  if(raycaster.ray.intersectPlane(_planoArrastre, _tgt)){
+    const newPos = _tgt.clone().sub(_arrastreOffset);
+    if(_placaCenter) _placaCenter.add(newPos.clone().sub(modelo.position));
+    modelo.position.copy(newPos);
+    needsRender = true;
+  }
+}
+
+function _handleMultiTouchDrag(curTouches, modelo){
+  if(curTouches.length < 2) return;
+  const prevTouches = curTouches.map(t => _findPrevTouch(t.id, t));
+  const midCurX  = (curTouches[0].x + curTouches[1].x) / 2;
+  const midCurY  = (curTouches[0].y + curTouches[1].y) / 2;
+  const midPrevX = (prevTouches[0].x + prevTouches[1].x) / 2;
+  const midPrevY = (prevTouches[0].y + prevTouches[1].y) / 2;
+  const dMidX = midCurX - midPrevX;
+  const dMidY = midCurY - midPrevY;
+
+  if(Math.hypot(dMidX, dMidY) > 0.3){
+    const distCam = camera.position.distanceTo(modelo.position);
+    const tanHFov = Math.tan((camera.fov / 2) * Math.PI / 180);
+    const scr2world = (distCam * tanHFov * 2) / renderer.domElement.clientHeight;
+    const camRight = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0);
+    const camUp    = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 1);
+    modelo.position.addScaledVector(camRight,  dMidX * scr2world);
+    modelo.position.addScaledVector(camUp,    -dMidY * scr2world);
+    if(_placaCenter){
+      _placaCenter.addScaledVector(camRight, dMidX * scr2world);
+      _placaCenter.addScaledVector(camUp, -dMidY * scr2world);
+    }
+  }
+
+  const distCur = Math.hypot(curTouches[1].x-curTouches[0].x, curTouches[1].y-curTouches[0].y);
+  if(_prevPinchDistTouch > 0){
+    _moverPlacaProfundidad(_placaArrastrandoId, (distCur-_prevPinchDistTouch)*0.0065);
+  }
+  _prevPinchDistTouch = distCur;
+
+  const f0dx = curTouches[0].x - prevTouches[0].x - dMidX;
+  const f0dy = curTouches[0].y - prevTouches[0].y - dMidY;
+  const sensibilidad = 0.0014;
+  const camRight2 = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0).normalize();
+  const localUp2 = new THREE.Vector3(0,1,0).transformDirection(modelo.matrixWorld).normalize();
+  _rotarAlrededorCentro(modelo, localUp2, f0dx * sensibilidad);
+  _rotarAlrededorCentro(modelo, camRight2, f0dy * sensibilidad);
+  needsRender = true;
+}
+
 // Timer de respaldo para activar arrastre de placa vía touch events.
 // A diferencia de _arrastrandoTimer (pointer), éste NO se cancela en pointercancel,
 // lo que permite que iOS active el arrastre aunque su reconocedor nativo dispare pointercancel.
 renderer.domElement.addEventListener('touchstart', e=>{
   if(_isIOS) e.preventDefault();
   if(e.touches.length === 2 && _touchDragTimer){ clearTimeout(_touchDragTimer); _touchDragTimer=null; }
-  if(e.touches.length !== 1 || _modoNotaActivo || _placaArrastrandoId) return;
+  if(e.touches.length === 2 && !_modoNotaActivo && !_placaArrastrandoId){
+    const ts = _snapshotTouches(e.touches).slice(0,2);
+    _touchTwoFingerStart = ts;
+    if(_twoFingerTimer){ clearTimeout(_twoFingerTimer); _twoFingerTimer=null; }
+    const startDist = Math.hypot(ts[1].x-ts[0].x, ts[1].y-ts[0].y);
+    const startMidX = (ts[0].x + ts[1].x) / 2;
+    const startMidY = (ts[0].y + ts[1].y) / 2;
+    _twoFingerTimer = setTimeout(()=>{
+      _twoFingerTimer = null;
+      if(_placaArrastrandoId) return;
+      if(_prevTouchSnapshot.length < 2) return;
+      const cur = _prevTouchSnapshot.slice(0,2);
+      const curDist = Math.hypot(cur[1].x-cur[0].x, cur[1].y-cur[0].y);
+      if(Math.abs(curDist - startDist) > 15) return;
+      _tryActivateDrag(startMidX, startMidY);
+    }, 250);
+  }
+  if(e.touches.length !== 1 || _modoNotaActivo || _placaArrastrandoId){
+    _prevTouchSnapshot = _snapshotTouches(e.touches);
+    return;
+  }
   const t = e.touches[0];
   _touchDragStartX = t.clientX; _touchDragStartY = t.clientY;
   if(_touchDragTimer) clearTimeout(_touchDragTimer);
@@ -3240,9 +3381,19 @@ renderer.domElement.addEventListener('touchstart', e=>{
     if(_placaArrastrandoId) return; // ya activado por otro camino
     _tryActivateDrag(_touchDragStartX, _touchDragStartY);
   }, 600);
+  _prevTouchSnapshot = _snapshotTouches(e.touches);
 }, {passive:false});
 renderer.domElement.addEventListener('touchmove', e=>{
   if(_isIOS && (_placaArrastrandoId || _touchDragTimer || e.touches.length > 1)) e.preventDefault();
+  const curTouches = _snapshotTouches(e.touches);
+  if(_twoFingerTimer && curTouches.length >= 2 && _touchTwoFingerStart){
+    const curDist = Math.hypot(curTouches[1].x-curTouches[0].x, curTouches[1].y-curTouches[0].y);
+    const startDist = Math.hypot(_touchTwoFingerStart[1].x-_touchTwoFingerStart[0].x, _touchTwoFingerStart[1].y-_touchTwoFingerStart[0].y);
+    if(Math.abs(curDist - startDist) > 15){
+      clearTimeout(_twoFingerTimer);
+      _twoFingerTimer = null;
+    }
+  }
   // Cancelar timer táctil si el dedo se ha movido demasiado (el usuario hace scroll/pan)
   if(_touchDragTimer && e.touches.length === 1){
     const t = e.touches[0];
@@ -3250,47 +3401,42 @@ renderer.domElement.addEventListener('touchmove', e=>{
       clearTimeout(_touchDragTimer); _touchDragTimer = null;
     }
   }
-  if(!_placaArrastrandoId) return;
-  if(e.touches.length === 1){
-    // 1 dedo: trasladar placa (path táctil para iOS tras pointercancel)
-    const t = e.touches[0];
-    const rect = renderer.domElement.getBoundingClientRect();
-    const px = ((t.clientX-rect.left)/rect.width)*2-1;
-    const py = -((t.clientY-rect.top)/rect.height)*2+1;
-    raycaster.setFromCamera({x:px,y:py}, camera);
-    const _tgt = new THREE.Vector3();
-    const modelo = modelos[_placaArrastrandoId];
-    if(modelo && raycaster.ray.intersectPlane(_planoArrastre, _tgt)){
-      const newPos = _tgt.clone().sub(_arrastreOffset);
-      if(_placaCenter) _placaCenter.add(newPos.clone().sub(modelo.position));
-      modelo.position.copy(newPos);
-      needsRender = true;
-    }
-  } else if(e.touches.length >= 2){
-    // 2+ dedos: pinch → profundidad
-    const t0=e.touches[0], t1=e.touches[1];
-    const d = Math.hypot(t1.clientX-t0.clientX, t1.clientY-t0.clientY);
-    if(_prevPinchDistTouch > 0) _moverPlacaProfundidad(_placaArrastrandoId, (d-_prevPinchDistTouch)*0.0065);
-    _prevPinchDistTouch = d;
+  if(!_placaArrastrandoId){
+    _prevTouchSnapshot = curTouches;
+    return;
   }
+  const modelo = modelos[_placaArrastrandoId];
+  if(!modelo){
+    _prevTouchSnapshot = curTouches;
+    return;
+  }
+  if(curTouches.length === 1){
+    _handleSingleTouchDrag(curTouches[0], _findPrevTouch(curTouches[0].id, curTouches[0]), modelo);
+  } else if(curTouches.length >= 2){
+    _handleMultiTouchDrag(curTouches, modelo);
+  }
+  _prevTouchSnapshot = curTouches;
 }, {passive:false});
 renderer.domElement.addEventListener('touchend', e=>{
   if(_isIOS) e.preventDefault();
+  if(_twoFingerTimer && e.touches.length < 2){ clearTimeout(_twoFingerTimer); _twoFingerTimer=null; }
+  _touchTwoFingerStart = e.touches.length >= 2 ? _snapshotTouches(e.touches).slice(0,2) : null;
   if(e.touches.length<2) _prevPinchDistTouch=0;
   if(_arrastrandoTimer){ clearTimeout(_arrastrandoTimer); _arrastrandoTimer=null; }
   if(_touchDragTimer){ clearTimeout(_touchDragTimer); _touchDragTimer=null; }
   if(_placaArrastrandoId && e.touches.length===0){
-    _setPlacaGlow(_placaArrastrandoId,false); _eliminarIndicadorFondo(); _ocultarHint(); _eliminarOverlayColision();
-    _modoGiroZ=false; _giroZEsTop=false; _giroZPivot=null; _modoGiroY=false; _giroYEsLeft=false; _giroYPivot=null; _placaCenter=null;
-    controls.enabled=true;
-    PlacaArrastrando.postMessage(JSON.stringify({id:_placaArrastrandoId,active:false}));
-    _placaArrastrandoId=null;
+    _finishPlacaDrag();
   }
+  _prevTouchSnapshot = _snapshotTouches(e.touches);
 }, {passive:false});
 renderer.domElement.addEventListener('touchcancel', e=>{
   if(_isIOS) e.preventDefault();
+  if(_twoFingerTimer){ clearTimeout(_twoFingerTimer); _twoFingerTimer=null; }
+  _touchTwoFingerStart = null;
   _prevPinchDistTouch=0;
   if(_touchDragTimer){ clearTimeout(_touchDragTimer); _touchDragTimer=null; }
+  if(_placaArrastrandoId && e.touches.length===0) _finishPlacaDrag();
+  _prevTouchSnapshot = _snapshotTouches(e.touches);
 }, {passive:false});
 animate();
 controls.addEventListener('change', ()=>{ needsRender = true; });

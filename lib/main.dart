@@ -47,6 +47,7 @@ Future<void> mostrarNotificacion(RemoteMessage message) async {
 
   const NotificationDetails details = NotificationDetails(
     android: androidDetails,
+    iOS: DarwinNotificationDetails(),
   );
 
   await flutterLocalNotificationsPlugin.show(
