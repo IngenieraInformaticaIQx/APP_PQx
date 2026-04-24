@@ -39,9 +39,16 @@ void main() async {
 Future<void> initNotificaciones() async {
   const AndroidInitializationSettings androidSettings =
   AndroidInitializationSettings('@mipmap/ic_launcher');
+  const DarwinInitializationSettings iosSettings =
+  DarwinInitializationSettings(
+    requestAlertPermission: false,
+    requestBadgePermission: false,
+    requestSoundPermission: false,
+  );
 
   const InitializationSettings settings = InitializationSettings(
     android: androidSettings,
+    iOS: iosSettings,
   );
 
   await flutterLocalNotificationsPlugin.initialize(settings);
@@ -59,6 +66,7 @@ Future<void> mostrarNotificacion(RemoteMessage message) async {
 
   const NotificationDetails details = NotificationDetails(
     android: androidDetails,
+    iOS: DarwinNotificationDetails(),
   );
 
   await flutterLocalNotificationsPlugin.show(
