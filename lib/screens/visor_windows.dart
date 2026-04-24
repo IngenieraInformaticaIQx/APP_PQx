@@ -16,6 +16,7 @@ class VisorWindows extends StatefulWidget {
   final void Function(String)? onCaptura;
   final void Function(String)? onReglaLibre;
   final void Function(String)? onNotaTap;
+  final void Function(String)? onScrewTapped;
   final void Function(String)? onPlacaArrastrando;
 
   const VisorWindows({
@@ -31,6 +32,7 @@ class VisorWindows extends StatefulWidget {
     this.onCaptura,
     this.onReglaLibre,
     this.onNotaTap,
+    this.onScrewTapped,
     this.onPlacaArrastrando,
   }) : assert(url != null || htmlContent != null,
             'Debe proporcionar url o htmlContent');
@@ -68,6 +70,7 @@ class VisorWindowsState extends State<VisorWindows> {
           case 'Captura':           widget.onCaptura?.call(msg); break;
           case 'ReglaLibre':        widget.onReglaLibre?.call(msg); break;
           case 'NotaTap':           widget.onNotaTap?.call(msg); break;
+          case 'ScrewTapped':       widget.onScrewTapped?.call(msg); break;
           case 'PlacaArrastrando':  widget.onPlacaArrastrando?.call(msg); break;
         }
       } catch (_) {}
