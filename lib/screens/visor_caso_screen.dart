@@ -174,26 +174,19 @@ class Nota3D {
 }
 
 class _DesplazamientoPlaca {
-  final double horizontalMm;
-  final double verticalMm;
-  final double profundidadMm;
-  final double penduloVerticalDeg;
-  final double penduloLateralDeg;
+  final double dx, dy, dz; // desplazamiento en espacio mundo (mm)
+  final double dist;        // distancia total
+  final double rotX, rotY, rotZ; // rotación por eje mundo (°)
+  final double rotTotal;    // ángulo total de rotación (°)
 
   const _DesplazamientoPlaca({
-    this.horizontalMm = 0,
-    this.verticalMm = 0,
-    this.profundidadMm = 0,
-    this.penduloVerticalDeg = 0,
-    this.penduloLateralDeg = 0,
+    this.dx = 0, this.dy = 0, this.dz = 0,
+    this.dist = 0,
+    this.rotX = 0, this.rotY = 0, this.rotZ = 0,
+    this.rotTotal = 0,
   });
 
-  bool get tieneDesplazamiento =>
-      horizontalMm.abs() > 0.05 ||
-      verticalMm.abs() > 0.05 ||
-      profundidadMm.abs() > 0.05 ||
-      penduloVerticalDeg.abs() > 0.05 ||
-      penduloLateralDeg.abs() > 0.05;
+  bool get tieneDesplazamiento => dist > 0.05 || rotTotal > 0.05;
 }
 
 class TornilloColocado {
@@ -301,6 +294,7 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
 
   double _panelHeight = 680.0;
   bool _autoRotate   = false;
+  bool _ghostVisible = true;
   bool _visorListo   = false;
   final _visorWindowsKey = GlobalKey<VisorWindowsState>();
   String _credencial = '';
@@ -352,6 +346,7 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
   final List<Nota3D> _notas = [];
   int  _notaCounter    = 0;
   final ValueNotifier<int> _notasVersion = ValueNotifier(0);
+  Completer<Map<String, dynamic>>? _estadoVisorCompleter;
 
   // Vistas rápidas
   bool _vistasPanelVisible = false;
@@ -402,11 +397,14 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
       final d = jsonDecode(raw) as Map<String, dynamic>;
       final activa = d['active'] == true;
       final desplazamiento = _DesplazamientoPlaca(
-        horizontalMm: (d['dx'] as num?)?.toDouble() ?? 0,
-        verticalMm: (d['dy'] as num?)?.toDouble() ?? 0,
-        profundidadMm: (d['dz'] as num?)?.toDouble() ?? 0,
-        penduloVerticalDeg: (d['rotV'] as num?)?.toDouble() ?? 0,
-        penduloLateralDeg: (d['rotL'] as num?)?.toDouble() ?? 0,
+        dx: (d['dx'] as num?)?.toDouble() ?? 0,
+        dy: (d['dy'] as num?)?.toDouble() ?? 0,
+        dz: (d['dz'] as num?)?.toDouble() ?? 0,
+        dist: (d['dist'] as num?)?.toDouble() ?? 0,
+        rotX: (d['rotX'] as num?)?.toDouble() ?? 0,
+        rotY: (d['rotY'] as num?)?.toDouble() ?? 0,
+        rotZ: (d['rotZ'] as num?)?.toDouble() ?? 0,
+        rotTotal: (d['rotTotal'] as num?)?.toDouble() ?? 0,
       );
 
       if (haptics && activa && !_placaArrastrandoActiva) {
@@ -497,12 +495,18 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
           if (widget.sesionGuardada != null) {
             _credencialesFuture.then((_) async {
               if (!mounted) return;
-              await _restaurarSesion(widget.sesionGuardada!);
+              await _restaurarSesionCompleta(widget.sesionGuardada!);
             });
           } else if (widget.autoCargar && widget.planLocal != null) {
             _credencialesFuture.then((_) async {
               if (!mounted) return;
               await _autoCargarTodo();
+            });
+          } else if (!widget.autoCargar && widget.planLocal != null) {
+            // Mis Planificaciones: restaurar sesión 3D completa guardada
+            _credencialesFuture.then((_) async {
+              if (!mounted) return;
+              await _restaurarSesionPlan();
             });
           } else if (widget.autoCargar && widget.planLocal == null) {
             // Último caso desde menú: restaurar estado si existe, si no cargar todo
@@ -641,6 +645,12 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
           } catch (_) {}
         })..addJavaScriptChannel('PlacaArrastrando', onMessageReceived: (msg) {
           _actualizarEstadoPlacaArrastrando(msg.message);
+        })..addJavaScriptChannel('EstadoVisor', onMessageReceived: (msg) {
+          try {
+            final data = jsonDecode(msg.message) as Map<String, dynamic>;
+            _estadoVisorCompleter?.complete(data);
+            _estadoVisorCompleter = null;
+          } catch (_) {}
         })
 
         ..loadHtmlString(_patchHtmlTheme(_buildHtml()));
@@ -721,6 +731,21 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
       'usarTrayectoria': t.usarTrayectoria,
     }).toList();
 
+    final notasJson = _notas.map((n) => {
+      'id': n.id, 'texto': n.texto,
+      'x': n.x, 'y': n.y, 'z': n.z, 'visible': n.visible,
+    }).toList();
+    final opacidadesJson = <String, dynamic>{};
+    _opacidades.forEach((k, v) => opacidadesJson[k.toString()] = v);
+    final coloresJson = <String, dynamic>{};
+    _colores.forEach((k, v) => coloresJson[k.toString()] = v.value);
+    final despJson = {
+      'dx': _placaDesplazamiento.dx, 'dy': _placaDesplazamiento.dy,
+      'dz': _placaDesplazamiento.dz, 'dist': _placaDesplazamiento.dist,
+      'rotX': _placaDesplazamiento.rotX, 'rotY': _placaDesplazamiento.rotY,
+      'rotZ': _placaDesplazamiento.rotZ, 'rotTotal': _placaDesplazamiento.rotTotal,
+    };
+
     SharedPreferences.getInstance().then((prefs) {
       prefs.setString('ultimo_caso_visibles', indices.join(','));
       if (tornillosEntries.isNotEmpty) {
@@ -735,7 +760,13 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
       // Guardar estado completo para restaurar al volver
       prefs.setString('estado_caso_${widget.caso.id}', json.encode({
         'capas_visibles': capasVisibles,
-        'tornillos_sesion_actual': tornillosCompletos,
+        'tornillos': tornillosCompletos,
+        'tornillos_sesion_actual': tornillosCompletos, // compatibilidad
+        'notas': notasJson,
+        'opacidades': opacidadesJson,
+        'colores': coloresJson,
+        'desplazamiento': despJson,
+        'audio_notas_id': _audioNotasId,
       }));
     });
   }
@@ -1244,24 +1275,112 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
         hdy: (t['hdy'] as num? ?? 0).toDouble(),
         hdz: (t['hdz'] as num? ?? 0).toDouble(),
         usarTrayectoria: t['usarTrayectoria'] as bool? ?? false,
-        visible: false,
+        visible: t['visible'] as bool? ?? true,
+        reglaVisible: t['reglaVisible'] as bool? ?? true,
       );
       setState(() => _tornillosColocados.add(tc));
       _colocadosVersion.value++;
     }
     setState(() => _screwCounter = maxId);
-    // Nota: la colocación visual 3D de tornillos requiere coordenadas guardadas
-    // con la versión actualizada de la app.
+  }
+
+  /// Restaura sesión completa: modelos 3D, notas, opacidades, colores, cámara.
+  Future<void> _restaurarSesionCompleta(Map<String, dynamic> sesion) async {
+    // 1. Capas y tornillos (misma lógica base)
+    final tornillosKey = sesion.containsKey('tornillos') ? 'tornillos' : 'tornillos_sesion_actual';
+    await _restaurarSesion({
+      'capas_visibles': sesion['capas_visibles'],
+      'tornillos_sesion_actual': sesion[tornillosKey],
+    });
+
+    // 2. Esperar a que los GLBs carguen antes de reposicionar
+    await Future<void>.delayed(const Duration(milliseconds: 1200));
+    if (!mounted) return;
+
+    // 3. Restaurar posiciones/rotaciones de modelos + cámara en JS
+    final visorState = sesion['visor_state'];
+    if (visorState != null) {
+      // Usar JSON.parse dentro de JS para evitar problemas de escape
+      final visorStateB64 = base64Encode(utf8.encode(json.encode(visorState)));
+      _jsRun("if(window.visor&&window.visor.restaurarEstadoVisor)"
+          "window.visor.restaurarEstadoVisor(JSON.parse(atob('$visorStateB64')));");
+    }
+
+    // 4. Restaurar opacidades
+    final opacidades = sesion['opacidades'] as Map<String, dynamic>? ?? {};
+    opacidades.forEach((k, v) {
+      final idx = int.tryParse(k);
+      if (idx != null) {
+        final op = (v as num).toDouble();
+        setState(() => _opacidades[idx] = op);
+        _jsSetOpacidad(idx, op);
+      }
+    });
+
+    // 5. Restaurar colores
+    final colores = sesion['colores'] as Map<String, dynamic>? ?? {};
+    colores.forEach((k, v) {
+      final idx = int.tryParse(k);
+      if (idx != null) {
+        final color = Color((v as num).toInt());
+        setState(() => _colores[idx] = color);
+        _jsColor(idx, color);
+      }
+    });
+
+    // 6. Restaurar notas 3D
+    final notas = (sesion['notas'] as List? ?? []).cast<Map<String, dynamic>>();
+    for (final n in notas) {
+      final id = n['id'] as String? ?? 'nota_${_notaCounter++}';
+      final nota = Nota3D(
+        id: id, texto: n['texto'] as String? ?? '',
+        x: (n['x'] as num? ?? 0).toDouble(),
+        y: (n['y'] as num? ?? 0).toDouble(),
+        z: (n['z'] as num? ?? 0).toDouble(),
+        visible: n['visible'] as bool? ?? true,
+      );
+      _notas.add(nota);
+      _jsNotaAdd(nota.id, nota.x, nota.y, nota.z, nota.texto);
+      if (!nota.visible) _jsNotaToggle(nota.id, false);
+    }
+    _notasVersion.value++;
+
+    // 7. Restaurar desplazamiento mostrado
+    final desp = sesion['desplazamiento'] as Map<String, dynamic>?;
+    if (desp != null) {
+      setState(() => _placaDesplazamiento = _DesplazamientoPlaca(
+        dx: (desp['dx'] as num? ?? 0).toDouble(),
+        dy: (desp['dy'] as num? ?? 0).toDouble(),
+        dz: (desp['dz'] as num? ?? 0).toDouble(),
+        dist: (desp['dist'] as num? ?? 0).toDouble(),
+        rotX: (desp['rotX'] as num? ?? 0).toDouble(),
+        rotY: (desp['rotY'] as num? ?? 0).toDouble(),
+        rotZ: (desp['rotZ'] as num? ?? 0).toDouble(),
+        rotTotal: (desp['rotTotal'] as num? ?? 0).toDouble(),
+      ));
+    }
   }
 
   /// Restaura el estado de la última visita al caso (Mis Casos).
   Future<void> _restaurarEstadoCaso() async {
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString('estado_caso_${widget.caso.id}');
-    if (raw == null) return; // primera vez que se abre este caso
+    if (raw == null) return;
     try {
       final sesion = json.decode(raw) as Map<String, dynamic>;
-      await _restaurarSesion(sesion);
+      await _restaurarSesionCompleta(sesion);
+    } catch (_) {}
+  }
+
+  /// Restaura la sesión guardada de un plan de Mis Planificaciones.
+  Future<void> _restaurarSesionPlan() async {
+    if (widget.planLocal == null) return;
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString('sesion_plan_${widget.planLocal!.id}');
+    if (raw == null) return;
+    try {
+      final sesion = json.decode(raw) as Map<String, dynamic>;
+      await _restaurarSesionCompleta(sesion);
     } catch (_) {}
   }
 
@@ -1716,7 +1835,7 @@ function _actualizarHuellaOrigen(id){
   const moved =
     modelo.position.distanceToSquared(origPos) > 1e-6 ||
     1 - Math.abs(modelo.quaternion.dot(origQuat)) > 1e-6;
-  ref.visible = modelo.visible && moved;
+  ref.visible = _huellaVisible && modelo.visible && moved;
   needsRender = true;
 }
 
@@ -1725,26 +1844,26 @@ function _postPlacaArrastrando(id, active, extra){
   const modelo = modelos[id];
   if(modelo && modelo.userData && modelo.userData.origPos){
     const delta = modelo.position.clone().sub(modelo.userData.origPos);
-    const camRight = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0).normalize();
-    const camUp = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 1).normalize();
-    const camFwd = camera.getWorldDirection(new THREE.Vector3()).normalize();
-    payload.dx = Math.round(delta.dot(camRight) * 10) / 10;
-    payload.dy = Math.round(delta.dot(camUp) * 10) / 10;
-    payload.dz = Math.round(delta.dot(camFwd) * 10) / 10;
+    payload.dx   = Math.round(delta.x * 10) / 10;
+    payload.dy   = Math.round(delta.y * 10) / 10;
+    payload.dz   = Math.round(delta.z * 10) / 10;
+    payload.dist = Math.round(delta.length() * 10) / 10;
     if(modelo.userData.origQuat){
-      const origQuat = modelo.userData.origQuat.clone();
-      const origUp = new THREE.Vector3(0,1,0).applyQuaternion(origQuat).normalize();
-      const curUp = new THREE.Vector3(0,1,0).applyQuaternion(modelo.quaternion).normalize();
-      const origRight = new THREE.Vector3(1,0,0).applyQuaternion(origQuat).normalize();
-      const curRight = new THREE.Vector3(1,0,0).applyQuaternion(modelo.quaternion).normalize();
-      payload.rotV = Math.round(_signedAngleOnAxis(origUp, curUp, camFwd) * 10) / 10;
-      payload.rotL = Math.round(_signedAngleOnAxis(origRight, curRight, camUp) * 10) / 10;
+      const diffQuat = new THREE.Quaternion()
+        .multiplyQuaternions(modelo.quaternion, modelo.userData.origQuat.clone().invert())
+        .normalize();
+      const euler = new THREE.Euler().setFromQuaternion(diffQuat, 'YXZ');
+      payload.rotX = Math.round(THREE.MathUtils.radToDeg(euler.x) * 10) / 10;
+      payload.rotY = Math.round(THREE.MathUtils.radToDeg(euler.y) * 10) / 10;
+      payload.rotZ = Math.round(THREE.MathUtils.radToDeg(euler.z) * 10) / 10;
+      const totalAngle = 2 * Math.acos(Math.min(1, Math.abs(diffQuat.w)));
+      payload.rotTotal = Math.round(THREE.MathUtils.radToDeg(totalAngle) * 10) / 10;
     } else {
-      payload.rotV = 0; payload.rotL = 0;
+      payload.rotX = 0; payload.rotY = 0; payload.rotZ = 0; payload.rotTotal = 0;
     }
   } else {
-    payload.dx = 0; payload.dy = 0; payload.dz = 0;
-    payload.rotV = 0; payload.rotL = 0;
+    payload.dx = 0; payload.dy = 0; payload.dz = 0; payload.dist = 0;
+    payload.rotX = 0; payload.rotY = 0; payload.rotZ = 0; payload.rotTotal = 0;
   }
   if(extra) Object.assign(payload, extra);
   PlacaArrastrando.postMessage(JSON.stringify(payload));
@@ -2166,6 +2285,41 @@ tornilloScene.position.copy(hitPoint)
   tornilloScene.userData.origPos  = tornilloScene.position.clone();
   tornilloScene.userData.origQuat = tornilloScene.quaternion.clone();
   modelos[d.instanceId] = tornilloScene;
+
+  // Animación de roscado: viene desde fuera (hacia cámara) y entra girando
+  const _saEndQuat = tornilloScene.quaternion.clone();
+  const _saEndPos  = tornilloScene.position.clone();
+  // Tamaño para saber cuánto desplazar hacia fuera
+  const _saBox  = new THREE.Box3().setFromObject(tornilloScene);
+  const _saSize = new THREE.Vector3(); _saBox.getSize(_saSize);
+  const _saLargo = Math.max(_saSize.x, _saSize.y, _saSize.z);
+  // Eje de longitud local (mismo criterio que orientarTornillo)
+  let _saLocalAxis;
+  if(_saSize.x >= _saSize.y && _saSize.x >= _saSize.z)      _saLocalAxis = new THREE.Vector3(1,0,0);
+  else if(_saSize.z >= _saSize.x && _saSize.z >= _saSize.y) _saLocalAxis = new THREE.Vector3(0,0,1);
+  else                                                        _saLocalAxis = new THREE.Vector3(0,1,0);
+  // Posición de inicio: desplazada hacia fuera (hitNormal apunta hacia la cámara)
+  const _saWorldEnd = new THREE.Vector3();
+  tornilloScene.getWorldPosition(_saWorldEnd);
+  // Dirección de inserción (hacia dentro del hueso) → negada = hacia fuera (cámara)
+  const _saInsertDir = new THREE.Vector3(d.dx, d.dy, d.dz).normalize();
+  const _saWorldStart = _saWorldEnd.clone().addScaledVector(_saInsertDir, -_saLargo * 1.2);
+  if(tornilloScene.parent) tornilloScene.parent.updateWorldMatrix(true, false);
+  const _saStartPos = tornilloScene.parent
+    ? tornilloScene.parent.worldToLocal(_saWorldStart.clone())
+    : _saWorldStart.clone();
+  tornilloScene.position.copy(_saStartPos);
+  _screwAnims.push({
+    scene: tornilloScene,
+    startPos: _saStartPos,
+    endPos:   _saEndPos,
+    endQuat:  _saEndQuat,
+    axis:     _saLocalAxis,
+    t0:   performance.now(),
+    dur:  900,
+    turns: 3,
+  });
+
   _invalidarCacheMeshes();
 
   // Ocultar el cilindro guía que fue tocado
@@ -2758,6 +2912,56 @@ window.visor={
     outlinePass.selectedObjects = prev;
     Captura.postMessage(dataUrl);
   },
+  toggleGhost: function(visible){
+    _huellaVisible = visible;
+    for(const id in modelos){ _actualizarHuellaOrigen(id); }
+    needsRender = true;
+  },
+  exportarEstadoVisor: function(){
+    const estado = { modelos: {}, camara: {}, colores: {} };
+    for(const id in modelos){
+      const m = modelos[id];
+      estado.modelos[id] = {
+        px: m.position.x, py: m.position.y, pz: m.position.z,
+        qx: m.quaternion.x, qy: m.quaternion.y, qz: m.quaternion.z, qw: m.quaternion.w,
+        visible: m.visible,
+      };
+      if(_coloresGlb[id] !== undefined) estado.colores[id] = _coloresGlb[id];
+    }
+    estado.camara = {
+      px: camera.position.x, py: camera.position.y, pz: camera.position.z,
+      tx: controls.target.x, ty: controls.target.y, tz: controls.target.z,
+    };
+    EstadoVisor.postMessage(JSON.stringify(estado));
+  },
+  restaurarEstadoVisor: function(estadoOrStr){
+    try{
+      const estado = (typeof estadoOrStr === 'string') ? JSON.parse(estadoOrStr) : estadoOrStr;
+      if(estado.modelos){
+        for(const id in estado.modelos){
+          const m = modelos[id];
+          if(!m) continue;
+          const s = estado.modelos[id];
+          m.position.set(s.px, s.py, s.pz);
+          m.quaternion.set(s.qx, s.qy, s.qz, s.qw);
+          if(s.visible !== undefined) m.visible = s.visible;
+          _actualizarHuellaOrigen(id);
+        }
+      }
+      if(estado.colores){
+        for(const id in estado.colores){ setColor(id, estado.colores[id]); }
+      }
+      if(estado.camara){
+        const c = estado.camara;
+        camera.position.set(c.px, c.py, c.pz);
+        controls.target.set(c.tx, c.ty, c.tz);
+        controls.update();
+      }
+      // Reportar desplazamientos actuales tras restaurar
+      for(const id in modelos){ _postPlacaArrastrando(id, false); }
+      needsRender = true;
+    } catch(e){ VisorLog.postMessage('restaurarEstadoVisor error: '+e); }
+  },
 };
 
 // ── Detectar tap (no drag) sobre cualquier mesh ────────────────────────────
@@ -2775,6 +2979,9 @@ let _arrastreMaxDist = 0; // máximo desplazamiento durante el timer
 let _lastPointerX = 0, _lastPointerY = 0; // posición actual del puntero
 const _arrastreTarget = new THREE.Vector3(); // buffer reutilizable para intersección
 let _dblTapModelId = null, _dblTapTime = 0; // doble tap para reset
+let _huellaVisible = true;
+let _resetAnim = null; // { id, startPos, endPos, startQuat, endQuat, t0, dur }
+let _screwAnims = []; // animaciones de roscado activas
 const _glowMeshes = []; // (ya no se usa con OutlinePass, se mantiene por compatibilidad)
 let   _glowMat    = null;
 
@@ -3264,12 +3471,18 @@ renderer.domElement.addEventListener('pointerup', e=>{
         if(found){tappedId=id; break;}
       }
       if(tappedId && tappedId===_dblTapModelId && nowDt-_dblTapTime<350){
-        // Reset placa a origen — tornillos (hijos) vuelven a sus posiciones locales originales
-        modelos[tappedId].position.copy(modelos[tappedId].userData.origPos || new THREE.Vector3());
-        modelos[tappedId].quaternion.copy(modelos[tappedId].userData.origQuat || new THREE.Quaternion());
-        _actualizarHuellaOrigen(tappedId);
-        needsRender=true; _dblTapModelId=null; _dblTapTime=0;
-        _postPlacaArrastrando(tappedId, false, { reset:true });
+        // Reset placa a origen con animación suave
+        const m = modelos[tappedId];
+        _resetAnim = {
+          id: tappedId,
+          startPos: m.position.clone(),
+          endPos: (m.userData.origPos || new THREE.Vector3()).clone(),
+          startQuat: m.quaternion.clone(),
+          endQuat: (m.userData.origQuat || new THREE.Quaternion()).clone(),
+          t0: performance.now(),
+          dur: 550,
+        };
+        _dblTapModelId=null; _dblTapTime=0;
         return;
       }
       _dblTapModelId = tappedId; _dblTapTime = nowDt;
@@ -3406,6 +3619,39 @@ let   _lastFrameT = 0;
 function animate(now){
   requestAnimationFrame(animate);
   controls.update();
+  for(let i=_screwAnims.length-1;i>=0;i--){
+    const sa=_screwAnims[i];
+    const t=Math.min(1,(now-sa.t0)/sa.dur);
+    const ease=1-Math.pow(1-t,3); // ease-out cúbico: entra rápido, frena al asentarse
+    // Posición: desliza desde fuera hacia dentro
+    sa.scene.position.lerpVectors(sa.startPos, sa.endPos, ease);
+    // Rotación: gira sobre su propio eje mientras entra
+    const extraAngle=(1-ease)*sa.turns*Math.PI*2;
+    sa.scene.quaternion.copy(sa.endQuat)
+      .multiply(new THREE.Quaternion().setFromAxisAngle(sa.axis,extraAngle));
+    needsRender=true;
+    if(t>=1){
+      sa.scene.position.copy(sa.endPos);
+      sa.scene.quaternion.copy(sa.endQuat);
+      _screwAnims.splice(i,1);
+    }
+  }
+  if(_resetAnim){
+    const t = Math.min(1, (now - _resetAnim.t0) / _resetAnim.dur);
+    const ease = 1 - Math.pow(1 - t, 3); // ease-out cúbico
+    const m = modelos[_resetAnim.id];
+    if(m){
+      m.position.lerpVectors(_resetAnim.startPos, _resetAnim.endPos, ease);
+      m.quaternion.slerpQuaternions(_resetAnim.startQuat, _resetAnim.endQuat, ease);
+      _actualizarHuellaOrigen(_resetAnim.id);
+    }
+    needsRender = true;
+    if(t >= 1){
+      if(m){ m.position.copy(_resetAnim.endPos); m.quaternion.copy(_resetAnim.endQuat); }
+      _postPlacaArrastrando(_resetAnim.id, false, { reset: true });
+      _resetAnim = null;
+    }
+  }
   if(!needsRender) return;
   if(now - _lastFrameT < _frameMs) return; // throttle framerate
   _lastFrameT = now;
@@ -3813,7 +4059,6 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
                 ),
               ),
             _buildTopBar(),
-            _buildBtnLimpiar(),
             // Overlay para cerrar el panel lateral al tocar fuera (excluye topbar)
             if (_panelAbierto && !Platform.isAndroid && !Platform.isIOS)
               Positioned(
@@ -3823,6 +4068,8 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
                   onTap: () => setState(() => _panelAbierto = false),
                 ),
               ),
+            _buildBtnLimpiar(),
+            _buildBtnGhost(),
             _buildPanelLateral(),
             if (_placaArrastrandoActiva || _placaDesplazamiento.tieneDesplazamiento)
               _buildPanelMedidasFlotante(),
@@ -4442,6 +4689,49 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
     );
   }
 
+  // ── Botón Ghost (sombra on/off, debajo de Limpiar) ───────────────────────
+  Widget _buildBtnGhost() {
+    return Positioned(
+      top: 114, left: 8,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+          child: GestureDetector(
+            onTap: () {
+              setState(() => _ghostVisible = !_ghostVisible);
+              _jsRun('if(window.visor && window.visor.toggleGhost) window.visor.toggleGhost(${_ghostVisible});');
+            },
+            child: Container(
+              height: 34,
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              decoration: BoxDecoration(
+                color: _ghostVisible ? AppTheme.cardBg1 : Colors.redAccent.withOpacity(0.15),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: _ghostVisible ? AppTheme.cardBorder : Colors.redAccent.withOpacity(0.6),
+                  width: 1.2,
+                ),
+                boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 8, offset: const Offset(0, 3))],
+              ),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                Icon(
+                  Icons.flip_to_back,
+                  size: 14,
+                  color: _ghostVisible ? AppTheme.darkText.withOpacity(0.55) : Colors.redAccent,
+                ),
+                const SizedBox(width: 5),
+                Text('Ghost', style: TextStyle(
+                    color: _ghostVisible ? AppTheme.darkText.withOpacity(0.65) : Colors.redAccent,
+                    fontSize: 12, fontWeight: FontWeight.w600)),
+              ]),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   // ── URL destino exportación ── CONFIGURA AQUÍ ─────────────────────────────
   // Cambia esta URL por el endpoint donde quieras recibir el multipart.
   // Si la dejas vacía ('') solo se mostrará el JSON en pantalla sin enviarlo.
@@ -4462,6 +4752,73 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
   }
 
   // ── Guardar en mis planificaciones (flujo IA) ─────────────────────────────
+  Future<Map<String, dynamic>?> _exportarEstadoVisorJs() async {
+    _estadoVisorCompleter = Completer<Map<String, dynamic>>();
+    _jsRun('if(window.visor&&window.visor.exportarEstadoVisor)window.visor.exportarEstadoVisor();');
+    try {
+      return await _estadoVisorCompleter!.future.timeout(const Duration(seconds: 4));
+    } catch (_) {
+      _estadoVisorCompleter = null;
+      return null;
+    }
+  }
+
+  Future<Map<String, dynamic>> _construirSesionCompleta() async {
+    // Capas visibles
+    final capasVisibles = <Map<String, dynamic>>[];
+    for (final entry in _visibles.entries) {
+      if (entry.value && entry.key < widget.caso.todosGlb.length) {
+        final glb = widget.caso.todosGlb[entry.key];
+        capasVisibles.add({
+          'indice': entry.key, 'nombre': glb.nombre,
+          'archivo': glb.archivo, 'tipo': glb.tipo, 'url': glb.url,
+        });
+      }
+    }
+    // Tornillos con estado completo
+    final tornillos = _tornillosColocados.map((t) => {
+      'instanceId': t.instanceId, 'glbId': t.glbId, 'nombre': t.nombre,
+      'cilindroId': t.cilindroId, 'largo_mm': t.largo,
+      'hx': t.hx, 'hy': t.hy, 'hz': t.hz,
+      'hnx': t.hnx, 'hny': t.hny, 'hnz': t.hnz,
+      'hdx': t.hdx, 'hdy': t.hdy, 'hdz': t.hdz,
+      'usarTrayectoria': t.usarTrayectoria,
+      'visible': t.visible,
+      'reglaVisible': t.reglaVisible,
+    }).toList();
+    // Notas 3D
+    final notas = _notas.map((n) => {
+      'id': n.id, 'texto': n.texto,
+      'x': n.x, 'y': n.y, 'z': n.z,
+      'visible': n.visible,
+    }).toList();
+    // Opacidades
+    final opacidades = <String, dynamic>{};
+    _opacidades.forEach((k, v) => opacidades[k.toString()] = v);
+    // Colores
+    final colores = <String, dynamic>{};
+    _colores.forEach((k, v) => colores[k.toString()] = v.value);
+    // Desplazamiento actual
+    final desp = {
+      'dx': _placaDesplazamiento.dx, 'dy': _placaDesplazamiento.dy,
+      'dz': _placaDesplazamiento.dz, 'dist': _placaDesplazamiento.dist,
+      'rotX': _placaDesplazamiento.rotX, 'rotY': _placaDesplazamiento.rotY,
+      'rotZ': _placaDesplazamiento.rotZ, 'rotTotal': _placaDesplazamiento.rotTotal,
+    };
+    // Estado 3D desde JS (posiciones/rotaciones de modelos + cámara)
+    final visorState = await _exportarEstadoVisorJs();
+    return {
+      'capas_visibles': capasVisibles,
+      'tornillos': tornillos,
+      'notas': notas,
+      'opacidades': opacidades,
+      'colores': colores,
+      'desplazamiento': desp,
+      'audio_notas_id': _audioNotasId,
+      if (visorState != null) 'visor_state': visorState,
+    };
+  }
+
   Future<void> _guardarEnMisPlanificaciones() async {
     if (widget.planLocal == null) return;
 
@@ -4563,6 +4920,12 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
           ? widget.caso.biomodelos.first.url
           : null,
     );
+
+    // Guardar sesión 3D completa (modelos, notas, tornillos, cámara...)
+    final sesion = await _construirSesionCompleta();
+    if (!mounted) return;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('sesion_plan_${planActualizado.id}', json.encode(sesion));
 
     await PlanificacionRepository.guardar(planActualizado);
     if (!mounted) return;
@@ -6456,7 +6819,7 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
                 Icon(Icons.straighten, size: 13, color: azul),
                 const SizedBox(width: 6),
                 Text(
-                  'MEDIDAS DE PLACA',
+                  'VARIACIONES',
                   style: TextStyle(
                     color: azul,
                     fontSize: 9.5,
@@ -6475,26 +6838,16 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
                 ),
               ),
               const SizedBox(height: 6),
-              _buildPlacaDesplazamientoRow(
-                'Horizontal',
-                _placaDesplazamiento.horizontalMm,
-                unidad: 'mm',
-              ),
-              const SizedBox(height: 6),
-              _buildPlacaDesplazamientoRow(
-                'Vertical',
-                _placaDesplazamiento.verticalMm,
-                unidad: 'mm',
-              ),
-              const SizedBox(height: 6),
-              _buildPlacaDesplazamientoRow(
-                'Profundidad',
-                _placaDesplazamiento.profundidadMm,
-                unidad: 'mm',
-              ),
+              _buildPlacaDesplazamientoRow('X  (lat.)', _placaDesplazamiento.dx, unidad: 'mm'),
+              const SizedBox(height: 5),
+              _buildPlacaDesplazamientoRow('Y  (vert.)', _placaDesplazamiento.dy, unidad: 'mm'),
+              const SizedBox(height: 5),
+              _buildPlacaDesplazamientoRow('Z  (AP)', _placaDesplazamiento.dz, unidad: 'mm'),
+              const SizedBox(height: 5),
+              _buildPlacaDesplazamientoRow('Total', _placaDesplazamiento.dist, unidad: 'mm', signed: false),
               const SizedBox(height: 10),
               Text(
-                'Inclinación',
+                'Rotación',
                 style: TextStyle(
                   color: AppTheme.subtitleColor,
                   fontSize: 9.5,
@@ -6502,15 +6855,13 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
                 ),
               ),
               const SizedBox(height: 6),
-              _buildPlacaAnguloRow(
-                'Péndulo vertical',
-                _placaDesplazamiento.penduloVerticalDeg,
-              ),
-              const SizedBox(height: 6),
-              _buildPlacaAnguloRow(
-                'Péndulo lateral',
-                _placaDesplazamiento.penduloLateralDeg,
-              ),
+              _buildPlacaAnguloRow('Rot. X', _placaDesplazamiento.rotX),
+              const SizedBox(height: 5),
+              _buildPlacaAnguloRow('Rot. Y', _placaDesplazamiento.rotY),
+              const SizedBox(height: 5),
+              _buildPlacaAnguloRow('Rot. Z', _placaDesplazamiento.rotZ),
+              const SizedBox(height: 5),
+              _buildPlacaAnguloRow('Total', _placaDesplazamiento.rotTotal, signed: false),
             ],
           ),
         ),
@@ -6520,12 +6871,15 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
 
   Widget _buildPlacaAnguloRow(
     String nombre,
-    double valor,
-  ) {
+    double valor, {
+    bool signed = true,
+  }) {
     final color = valor.abs() < 0.05
         ? AppTheme.subtitleColor
         : const Color(0xFF2A7FF5);
-    final dir = valor >= 0 ? '+' : '-';
+    final label = signed
+        ? '${valor >= 0 ? '+' : '-'}  ${valor.abs().toStringAsFixed(1)}°'
+        : '${valor.abs().toStringAsFixed(1)}°';
     return Row(
       children: [
         SizedBox(
@@ -6541,7 +6895,7 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
         ),
         Expanded(
           child: Text(
-            '$dir  ${valor.abs().toStringAsFixed(1)}°',
+            label,
             textAlign: TextAlign.right,
             style: TextStyle(
               color: color,
@@ -6558,7 +6912,7 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
     final size = MediaQuery.of(context).size;
     final padding = MediaQuery.of(context).padding;
     const panelWidth = 228.0;
-    const estimatedHeight = 196.0;
+    const estimatedHeight = 270.0;
 
     if (_medidasPanelLeftOffset < 0) {
       _medidasPanelLeftOffset = 14;
@@ -6626,11 +6980,14 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
     String nombre,
     double valor, {
     required String unidad,
+    bool signed = true,
   }) {
     final color = valor.abs() < 0.05
         ? AppTheme.subtitleColor
         : const Color(0xFF2A7FF5);
-    final dir = valor >= 0 ? '+' : '-';
+    final label = signed
+        ? '${valor >= 0 ? '+' : '-'} ${valor.abs().toStringAsFixed(1)} $unidad'
+        : '${valor.abs().toStringAsFixed(1)} $unidad';
     return Row(
       children: [
         SizedBox(
@@ -6646,7 +7003,7 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
         ),
         Expanded(
           child: Text(
-            '$dir ${valor.abs().toStringAsFixed(1)} $unidad',
+            label,
             textAlign: TextAlign.right,
             style: TextStyle(
               color: color,
