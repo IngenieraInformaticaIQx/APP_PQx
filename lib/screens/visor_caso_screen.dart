@@ -3589,6 +3589,22 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
                           _tornilloListoCompleters[catId]?.complete();
                           _tornilloListoCompleters.remove(catId);
                         },
+                        onScrewTapped: (msg) {
+                          if (!mounted) return;
+                          try {
+                            final d = jsonDecode(msg) as Map<String, dynamic>;
+                            final instanceId = d['instanceId'] as String? ?? '';
+                            final tc = _tornillosColocados.firstWhere(
+                              (t) => t.instanceId == instanceId,
+                              orElse: () => throw StateError('not found'),
+                            );
+                            setState(() {
+                              _screwInfoTc = tc;
+                              _screwInfoSx = (d['sx'] as num).toDouble();
+                              _screwInfoSy = (d['sy'] as num).toDouble();
+                            });
+                          } catch (_) {}
+                        },
                   onPlacaArrastrando: (msg) {
                     if (!mounted) return;
 
