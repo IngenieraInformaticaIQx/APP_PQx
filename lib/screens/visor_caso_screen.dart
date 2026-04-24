@@ -2174,19 +2174,25 @@ function insertarTornillo(jsonStr){
   });
   tornilloScene.userData.esTornillo = true;
 
+  // Medir eje largo LOCAL del tornillo en reposo (antes de cualquier orientación)
+  tornilloScene.position.set(0,0,0); tornilloScene.rotation.set(0,0,0); tornilloScene.updateMatrixWorld(true);
+  const _preBox  = new THREE.Box3().setFromObject(tornilloScene);
+  const _preSize = new THREE.Vector3(); _preBox.getSize(_preSize);
+  let _preEjeIdx = 1;
+  if(_preSize.x>=_preSize.y && _preSize.x>=_preSize.z) _preEjeIdx=0;
+  else if(_preSize.z>=_preSize.x && _preSize.z>=_preSize.y) _preEjeIdx=2;
+  const _preLargo = [_preSize.x,_preSize.y,_preSize.z][_preEjeIdx];
+  const _preLocalAxis = [new THREE.Vector3(1,0,0),new THREE.Vector3(0,1,0),new THREE.Vector3(0,0,1)][_preEjeIdx];
+
   // Orientar y posicionar
   // Si viene de trayectoria, usar posición/dirección exactas del cilindro
   if(d.usarTrayectoria){
     const dirEntrada = new THREE.Vector3(d.dx, d.dy, d.dz).normalize();
 
-    // Medir eje largo del tornillo en reposo
-    tornilloScene.position.set(0,0,0); tornilloScene.rotation.set(0,0,0); tornilloScene.updateMatrixWorld(true);
-    const box = new THREE.Box3().setFromObject(tornilloScene);
-    const size = new THREE.Vector3(); box.getSize(size);
-    let ejeIdx = 1;
-    if(size.x>=size.y && size.x>=size.z) ejeIdx=0;
-    else if(size.z>=size.x && size.z>=size.y) ejeIdx=2;
-    const largo = [size.x,size.y,size.z][ejeIdx];
+    // Reusar medición pre-orientación
+    const box = _preBox; const size = _preSize;
+    let ejeIdx = _preEjeIdx;
+    const largo = _preLargo;
     const ejes = [new THREE.Vector3(1,0,0),new THREE.Vector3(0,1,0),new THREE.Vector3(0,0,1)];
 
     VisorLog.postMessage('=== TORNILLO DEBUG ===');
@@ -2286,37 +2292,32 @@ tornilloScene.position.copy(hitPoint)
   tornilloScene.userData.origQuat = tornilloScene.quaternion.clone();
   modelos[d.instanceId] = tornilloScene;
 
-  // Animación de roscado: viene desde fuera (hacia cámara) y entra girando
+  // Animación de roscado: viene desde fuera (hacia cámara) y entra girando.
+  // Usa _preLocalAxis/_preLargo medidos ANTES de orientar (espacio local real del tornillo).
   const _saEndQuat = tornilloScene.quaternion.clone();
   const _saEndPos  = tornilloScene.position.clone();
-  // Tamaño para saber cuánto desplazar hacia fuera
-  const _saBox  = new THREE.Box3().setFromObject(tornilloScene);
-  const _saSize = new THREE.Vector3(); _saBox.getSize(_saSize);
-  const _saLargo = Math.max(_saSize.x, _saSize.y, _saSize.z);
-  // Eje de longitud local (mismo criterio que orientarTornillo)
-  let _saLocalAxis;
-  if(_saSize.x >= _saSize.y && _saSize.x >= _saSize.z)      _saLocalAxis = new THREE.Vector3(1,0,0);
-  else if(_saSize.z >= _saSize.x && _saSize.z >= _saSize.y) _saLocalAxis = new THREE.Vector3(0,0,1);
-  else                                                        _saLocalAxis = new THREE.Vector3(0,1,0);
-  // Posición de inicio: desplazada hacia fuera (hitNormal apunta hacia la cámara)
+  tornilloScene.updateWorldMatrix(true, false);
   const _saWorldEnd = new THREE.Vector3();
   tornilloScene.getWorldPosition(_saWorldEnd);
-  // Dirección de inserción (hacia dentro del hueso) → negada = hacia fuera (cámara)
-  const _saInsertDir = new THREE.Vector3(d.dx, d.dy, d.dz).normalize();
-  const _saWorldStart = _saWorldEnd.clone().addScaledVector(_saInsertDir, -_saLargo * 1.2);
+  // Eje local proyectado al espacio mundo con la orientación final
+  const _saAxisWorld = _preLocalAxis.clone().applyQuaternion(tornilloScene.getWorldQuaternion(new THREE.Quaternion()));
+  // Elegir el sentido del eje que apunta hacia la cámara (= cabeza del tornillo)
+  const _saToCam = camera.position.clone().sub(_saWorldEnd).normalize();
+  const _saExitDir = _saToCam.dot(_saAxisWorld) >= 0 ? _saAxisWorld : _saAxisWorld.clone().negate();
+  const _saWorldStart = _saWorldEnd.clone().addScaledVector(_saExitDir, _preLargo * 1.2);
   if(tornilloScene.parent) tornilloScene.parent.updateWorldMatrix(true, false);
   const _saStartPos = tornilloScene.parent
     ? tornilloScene.parent.worldToLocal(_saWorldStart.clone())
     : _saWorldStart.clone();
   tornilloScene.position.copy(_saStartPos);
   _screwAnims.push({
-    scene: tornilloScene,
+    scene:    tornilloScene,
     startPos: _saStartPos,
     endPos:   _saEndPos,
     endQuat:  _saEndQuat,
-    axis:     _saLocalAxis,
+    axis:     _preLocalAxis,
     t0:   performance.now(),
-    dur:  900,
+    dur:  1100,
     turns: 3,
   });
 
