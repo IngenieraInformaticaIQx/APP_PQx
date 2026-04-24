@@ -2817,6 +2817,10 @@ function _actualizarOverlayColision(modelId){
 renderer.domElement.addEventListener('pointerdown', e=>{
   _ptrMap.set(e.pointerId, {x:e.clientX, y:e.clientY});
   _prevPtr.set(e.pointerId, {x:e.clientX, y:e.clientY});
+  if(_isIOS && e.pointerType === 'touch'){
+    pointerDownX=e.clientX; pointerDownY=e.clientY;
+    return;
+  }
   // Si ya arrastramos placa: segundo dedo o click derecho → rotación, no reiniciar timer
   if(_placaArrastrandoId) return;
   pointerDownX=e.clientX; pointerDownY=e.clientY;
@@ -2857,6 +2861,10 @@ renderer.domElement.addEventListener('pointermove', e=>{
   const prev = _ptrMap.get(e.pointerId);
   if(prev) _prevPtr.set(e.pointerId, {x:prev.x, y:prev.y});
   _ptrMap.set(e.pointerId, {x:e.clientX, y:e.clientY});
+  if(_isIOS && e.pointerType === 'touch'){
+    if(_placaArrastrandoId) needsRender = true;
+    return;
+  }
 
   if(_arrastrandoTimer){
     const d = Math.sqrt((e.clientX-pointerDownX)**2+(e.clientY-pointerDownY)**2);
@@ -2989,6 +2997,7 @@ renderer.domElement.addEventListener('wheel', e=>{
 renderer.domElement.addEventListener('pointercancel', e=>{
   _ptrMap.delete(e.pointerId); _prevPtr.delete(e.pointerId);
   if(_ptrMap.size < 2) _prevPinchDist = 0;
+  if(_isIOS && e.pointerType === 'touch') return;
   VisorLog.postMessage('pointercancel fired');
   if(_twoFingerTimer){ clearTimeout(_twoFingerTimer); _twoFingerTimer=null; }
   // No limpiar _arrastrandoTimer ni _touchDragTimer ni _placaArrastrandoId aquí:
@@ -2998,6 +3007,11 @@ renderer.domElement.addEventListener('pointercancel', e=>{
 renderer.domElement.addEventListener('pointerup', e=>{
   _ptrMap.delete(e.pointerId); _prevPtr.delete(e.pointerId);
   if(_ptrMap.size < 2) _prevPinchDist = 0;
+  if(_isIOS && e.pointerType === 'touch' && _placaArrastrandoId){
+    if(_ptrMap.size > 0){ needsRender=true; return; }
+    return;
+  }
+  if(_twoFingerTimer){ clearTimeout(_twoFingerTimer); _twoFingerTimer=null; }
   if(_arrastrandoTimer){ clearTimeout(_arrastrandoTimer); _arrastrandoTimer=null; }
   if(_placaArrastrandoId){
     if(_ptrMap.size > 0){ needsRender=true; return; } // queda otro dedo en pantalla
