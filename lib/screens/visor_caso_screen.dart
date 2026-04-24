@@ -1372,7 +1372,9 @@ const camera = new THREE.PerspectiveCamera(45, innerWidth/innerHeight, 0.1, 2000
 camera.position.set(0,0,500);
 
 const renderer = new THREE.WebGLRenderer({antialias:true, logarithmicDepthBuffer:true, preserveDrawingBuffer:true});
-renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setPixelRatio(/iPhone|iPad|Android/i.test(navigator.userAgent)
+  ? Math.min(devicePixelRatio, 1.5)  // móvil: limitar DPR para reducir carga GPU
+  : Math.min(devicePixelRatio, 2));
 renderer.setSize(innerWidth, innerHeight);
 renderer.shadowMap.enabled = true;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -1402,9 +1404,10 @@ controls.addEventListener('start', () => { controls.saveState(); });
 const composer = new EffectComposer(renderer);
 composer.addPass(new RenderPass(scene, camera));
 const outlinePass = new OutlinePass(new THREE.Vector2(innerWidth, innerHeight), scene, camera);
-outlinePass.edgeStrength  = 5.0;
-outlinePass.edgeGlow      = 1.5;
-outlinePass.edgeThickness = 2.0;
+const _isMob = /iPhone|iPad|Android/i.test(navigator.userAgent);
+outlinePass.edgeStrength  = _isMob ? 3.0 : 5.0;
+outlinePass.edgeGlow      = _isMob ? 0.5 : 1.5; // blur passes = principal coste GPU
+outlinePass.edgeThickness = _isMob ? 1.0 : 2.0;
 outlinePass.pulsePeriod   = 0;
 outlinePass.visibleEdgeColor.set(0x2A7FF5);
 outlinePass.hiddenEdgeColor.set(0x1A5FD8);
@@ -2694,6 +2697,114 @@ function _tryActivateDrag(screenX, screenY){
     _mostrarHint(false);
   }
   PlacaArrastrando.postMessage(JSON.stringify({id:modelId,active:true}));
+  _iniciarOverlayColision(modelId);
+}
+
+// ── Colisión placa-hueso: overlay rojo en zona de intersección ───────────────
+const _overlayColMeshes = []; // { mesh: THREE.Mesh, src: THREE.Mesh }
+let   _colCheckPending  = false;
+
+const _overlayColMat = new THREE.MeshBasicMaterial({
+  color: 0xFF2200, transparent: true, opacity: 0.55,
+  side: THREE.DoubleSide, depthTest: true, depthWrite: false,
+  polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
+});
+
+function _iniciarOverlayColision(modelId){
+  _eliminarOverlayColision();
+  modelos[modelId].traverse(c=>{
+    if(!c.isMesh || c.userData.esTrayectoria || c.userData.esTornillo
+       || c.userData.esOverlayColision || !c.geometry?.attributes?.position) return;
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', c.geometry.attributes.position); // shared, read-only
+    if(c.geometry.index) geo.setIndex(c.geometry.index); // needed for proper bbox
+    geo.setDrawRange(0, 0); // invisible hasta primer check
+    const m = new THREE.Mesh(geo, _overlayColMat);
+    m.userData.esOverlayColision = true;
+    m.renderOrder = 2;
+    c.add(m);
+    _overlayColMeshes.push({ mesh: m, src: c });
+  });
+}
+
+function _eliminarOverlayColision(){
+  for(const { mesh, src } of _overlayColMeshes){
+    src.remove(mesh);
+    mesh.geometry.dispose();
+  }
+  _overlayColMeshes.length = 0;
+  _colCheckPending = false;
+}
+
+function _puntoEnHueso(pt, meshes){
+  // 3 direcciones → mayoría de votos (robusto ante mallas no perfectas)
+  const dirs=[
+    new THREE.Vector3(1,0.17,0.09).normalize(),
+    new THREE.Vector3(-0.09,1,0.17).normalize(),
+    new THREE.Vector3(0.17,-0.09,1).normalize(),
+  ];
+  const rc = new THREE.Raycaster();
+  let v=0;
+  for(const d of dirs){ rc.set(pt,d); if(rc.intersectObjects(meshes,false).length%2===1) v++; }
+  return v>=2;
+}
+
+function _ejecutarColisionCheck(modelId){
+  _colCheckPending = false;
+  if(!_placaArrastrandoId || !_overlayColMeshes.length) return;
+
+  // Recoger meshes del hueso
+  const huesoMeshes=[];
+  for(const id in modelos){
+    if(modelos[id].userData.esHueso){
+      modelos[id].traverse(c=>{
+        if(c.isMesh && c.visible && !c.userData.esOverlayColision) huesoMeshes.push(c);
+      });
+    }
+  }
+  if(!huesoMeshes.length) return;
+
+  // AABB hueso + margen para pre-filtrado rápido
+  const boneBbox = new THREE.Box3();
+  for(const m of huesoMeshes) boneBbox.expandByObject(m);
+  boneBbox.expandByScalar(3);
+
+  const _v0=new THREE.Vector3(), _v1=new THREE.Vector3(),
+        _v2=new THREE.Vector3(), _cen=new THREE.Vector3();
+
+  for(const { mesh, src } of _overlayColMeshes){
+    const pos = src.geometry.attributes.position;
+    const idxArr = src.geometry.index?.array ?? null;
+    const triCount = idxArr ? idxArr.length/3 : pos.count/3;
+    const redIdx = [];
+
+    for(let t=0; t<triCount; t++){
+      const i0 = idxArr ? idxArr[t*3]   : t*3;
+      const i1 = idxArr ? idxArr[t*3+1] : t*3+1;
+      const i2 = idxArr ? idxArr[t*3+2] : t*3+2;
+      _v0.fromBufferAttribute(pos,i0).applyMatrix4(src.matrixWorld);
+      _v1.fromBufferAttribute(pos,i1).applyMatrix4(src.matrixWorld);
+      _v2.fromBufferAttribute(pos,i2).applyMatrix4(src.matrixWorld);
+      _cen.copy(_v0).add(_v1).add(_v2).divideScalar(3);
+      if(!boneBbox.containsPoint(_cen)) continue; // pre-filtro O(1)
+      if(_puntoEnHueso(_cen, huesoMeshes)) redIdx.push(i0,i1,i2);
+    }
+
+    if(redIdx.length){
+      mesh.geometry.setIndex(new THREE.BufferAttribute(new Uint32Array(redIdx),1));
+      mesh.geometry.index.needsUpdate = true;
+      mesh.geometry.setDrawRange(0, Infinity);
+    } else {
+      mesh.geometry.setDrawRange(0, 0);
+    }
+  }
+  needsRender = true;
+}
+
+function _actualizarOverlayColision(modelId){
+  if(_colCheckPending) return;
+  _colCheckPending = true;
+  setTimeout(()=>_ejecutarColisionCheck(modelId), 150);
 }
 
 renderer.domElement.addEventListener('pointerdown', e=>{
@@ -2745,6 +2856,7 @@ renderer.domElement.addEventListener('pointermove', e=>{
     if(d > _arrastreMaxDist) _arrastreMaxDist = d;
   }
   if(!_placaArrastrandoId) return;
+  _actualizarOverlayColision(_placaArrastrandoId);
 
   const modelo = modelos[_placaArrastrandoId];
   if(!modelo) return;
@@ -2793,7 +2905,8 @@ renderer.domElement.addEventListener('pointermove', e=>{
     const f0dy = pts[0].y - prevPts[0].y - dMidY;
     const sensibilidad = 0.0014;
     const camRight2 = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0).normalize();
-    _rotarAlrededorCentro(modelo, new THREE.Vector3(0,1,0), f0dx * sensibilidad);
+    const localUp2 = new THREE.Vector3(0,1,0).transformDirection(modelo.matrixWorld).normalize();
+    _rotarAlrededorCentro(modelo, localUp2, f0dx * sensibilidad);
     _rotarAlrededorCentro(modelo, camRight2, f0dy * sensibilidad);
 
     needsRender = true;
@@ -2807,7 +2920,8 @@ renderer.domElement.addEventListener('pointermove', e=>{
     }
     const sensibilidad = 0.0014;
     const camRight = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0).normalize();
-    _rotarAlrededorCentro(modelo, new THREE.Vector3(0,1,0), dx * sensibilidad);
+    const localUp = new THREE.Vector3(0,1,0).transformDirection(modelo.matrixWorld).normalize();
+    _rotarAlrededorCentro(modelo, localUp, dx * sensibilidad);
     _rotarAlrededorCentro(modelo, camRight, dy * sensibilidad);
     needsRender = true;
   } else if(e.buttons & 1 || _ptrMap.size === 1){
@@ -2870,7 +2984,7 @@ renderer.domElement.addEventListener('pointercancel', e=>{
   if(_ptrMap.size < 2) _prevPinchDist = 0;
   VisorLog.postMessage('pointercancel fired');
   if(_arrastrandoTimer){ clearTimeout(_arrastrandoTimer); _arrastrandoTimer=null; }
-  if(_placaArrastrandoId && _ptrMap.size === 0){ _setPlacaGlow(_placaArrastrandoId, false); _eliminarIndicadorFondo(); _ocultarHint(); _modoGiroZ=false; _giroZEsTop=false; _giroZPivot=null; _modoGiroY=false; _giroYEsLeft=false; _giroYPivot=null; _placaCenter=null; controls.enabled=true; _placaArrastrandoId=null; }
+  if(_placaArrastrandoId && _ptrMap.size === 0){ _setPlacaGlow(_placaArrastrandoId, false); _eliminarIndicadorFondo(); _ocultarHint(); _eliminarOverlayColision(); _modoGiroZ=false; _giroZEsTop=false; _giroZPivot=null; _modoGiroY=false; _giroYEsLeft=false; _giroYPivot=null; _placaCenter=null; controls.enabled=true; _placaArrastrandoId=null; }
 });
 renderer.domElement.addEventListener('pointerup', e=>{
   _ptrMap.delete(e.pointerId); _prevPtr.delete(e.pointerId);
@@ -2881,6 +2995,7 @@ renderer.domElement.addEventListener('pointerup', e=>{
     _setPlacaGlow(_placaArrastrandoId, false);
     _eliminarIndicadorFondo();
     _ocultarHint();
+    _eliminarOverlayColision();
     _modoGiroZ = false; _giroZEsTop = false; _giroZPivot = null;
     _modoGiroY = false; _giroYEsLeft = false; _giroYPivot = null;
     _placaCenter = null;
@@ -3076,10 +3191,16 @@ renderer.domElement.addEventListener('pointerup', e=>{
 });
 
 let needsRender = true;
-function animate(){
+// iOS/iPad: limitar a 30fps para evitar sobrecalentamiento (OutlinePass es costoso)
+const _isMobile = /iPhone|iPad|Android/i.test(navigator.userAgent);
+const _frameMs  = _isMobile ? 33 : 16; // 30fps móvil, 60fps desktop
+let   _lastFrameT = 0;
+function animate(now){
   requestAnimationFrame(animate);
   controls.update();
-  if(!needsRender && outlinePass.selectedObjects.length===0) return;
+  if(!needsRender) return;
+  if(now - _lastFrameT < _frameMs) return; // throttle framerate
+  _lastFrameT = now;
   composer.render();
   needsRender = false;
 }
@@ -3095,7 +3216,18 @@ renderer.domElement.addEventListener('touchmove', e=>{
   if(_prevPinchDistTouch > 0) _moverPlacaProfundidad(_placaArrastrandoId, (d-_prevPinchDistTouch)*0.0065);
   _prevPinchDistTouch = d;
 }, {passive:true});
-renderer.domElement.addEventListener('touchend',    e=>{ if(e.touches.length<2) _prevPinchDistTouch=0; }, {passive:true});
+renderer.domElement.addEventListener('touchend', e=>{
+  if(e.touches.length<2) _prevPinchDistTouch=0;
+  // iOS: cleanup de arrastre cuando no dispara pointerup tras pointercancel
+  if(_arrastrandoTimer){ clearTimeout(_arrastrandoTimer); _arrastrandoTimer=null; }
+  if(_placaArrastrandoId && e.touches.length===0){
+    _setPlacaGlow(_placaArrastrandoId,false); _eliminarIndicadorFondo(); _ocultarHint(); _eliminarOverlayColision();
+    _modoGiroZ=false; _giroZEsTop=false; _giroZPivot=null; _modoGiroY=false; _giroYEsLeft=false; _giroYPivot=null; _placaCenter=null;
+    controls.enabled=true;
+    PlacaArrastrando.postMessage(JSON.stringify({id:_placaArrastrandoId,active:false}));
+    _placaArrastrandoId=null;
+  }
+}, {passive:true});
 renderer.domElement.addEventListener('touchcancel', e=>{ _prevPinchDistTouch=0; }, {passive:true});
 animate();
 controls.addEventListener('change', ()=>{ needsRender = true; });
