@@ -2588,6 +2588,9 @@ let _placaArrastrandoId = null;
 let _planoArrastre = new THREE.Plane();
 let _arrastreOffset = new THREE.Vector3();
 let _arrastrandoTimer = null;
+let _twoFingerTimer = null;  // tap de 2 dedos con delay para no interferir con pinch
+let _touchDragTimer = null;  // timer táctil de respaldo (no lo mata pointercancel en iOS)
+let _touchDragStartX = 0, _touchDragStartY = 0;
 let _arrastreMaxDist = 0; // máximo desplazamiento durante el timer
 let _lastPointerX = 0, _lastPointerY = 0; // posición actual del puntero
 const _arrastreTarget = new THREE.Vector3(); // buffer reutilizable para intersección
@@ -2983,8 +2986,10 @@ renderer.domElement.addEventListener('pointercancel', e=>{
   _ptrMap.delete(e.pointerId); _prevPtr.delete(e.pointerId);
   if(_ptrMap.size < 2) _prevPinchDist = 0;
   VisorLog.postMessage('pointercancel fired');
-  if(_arrastrandoTimer){ clearTimeout(_arrastrandoTimer); _arrastrandoTimer=null; }
-  if(_placaArrastrandoId && _ptrMap.size === 0){ _setPlacaGlow(_placaArrastrandoId, false); _eliminarIndicadorFondo(); _ocultarHint(); _eliminarOverlayColision(); _modoGiroZ=false; _giroZEsTop=false; _giroZPivot=null; _modoGiroY=false; _giroYEsLeft=false; _giroYPivot=null; _placaCenter=null; controls.enabled=true; _placaArrastrandoId=null; }
+  if(_twoFingerTimer){ clearTimeout(_twoFingerTimer); _twoFingerTimer=null; }
+  // No limpiar _arrastrandoTimer ni _touchDragTimer ni _placaArrastrandoId aquí:
+  // en iOS pointercancel lo dispara el reconocedor nativo ANTES de que el timer active
+  // el arrastre. El cleanup lo gestiona touchend, que sí sabe si el dedo se levantó.
 });
 renderer.domElement.addEventListener('pointerup', e=>{
   _ptrMap.delete(e.pointerId); _prevPtr.delete(e.pointerId);
@@ -3214,19 +3219,59 @@ const _isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
 if(_isIOS){
   renderer.domElement.addEventListener('touchstart', e => e.preventDefault(), {passive: false});
 }
-// Pinch de profundidad vía touch events (passive=true para no interferir con pointer events)
+// Pinch de profundidad + traslación táctil (passive=true)
 let _prevPinchDistTouch = 0;
+// Timer de respaldo para activar arrastre de placa vía touch events.
+// A diferencia de _arrastrandoTimer (pointer), éste NO se cancela en pointercancel,
+// lo que permite que iOS active el arrastre aunque su reconocedor nativo dispare pointercancel.
+renderer.domElement.addEventListener('touchstart', e=>{
+  if(e.touches.length === 2 && _touchDragTimer){ clearTimeout(_touchDragTimer); _touchDragTimer=null; }
+  if(e.touches.length !== 1 || _modoNotaActivo || _placaArrastrandoId) return;
+  const t = e.touches[0];
+  _touchDragStartX = t.clientX; _touchDragStartY = t.clientY;
+  if(_touchDragTimer) clearTimeout(_touchDragTimer);
+  _touchDragTimer = setTimeout(()=>{
+    _touchDragTimer = null;
+    if(_placaArrastrandoId) return; // ya activado por otro camino
+    _tryActivateDrag(_touchDragStartX, _touchDragStartY);
+  }, 600);
+}, {passive:true});
 renderer.domElement.addEventListener('touchmove', e=>{
-  if(!_placaArrastrandoId || e.touches.length < 2) return;
-  const t0=e.touches[0], t1=e.touches[1];
-  const d = Math.hypot(t1.clientX-t0.clientX, t1.clientY-t0.clientY);
-  if(_prevPinchDistTouch > 0) _moverPlacaProfundidad(_placaArrastrandoId, (d-_prevPinchDistTouch)*0.0065);
-  _prevPinchDistTouch = d;
+  // Cancelar timer táctil si el dedo se ha movido demasiado (el usuario hace scroll/pan)
+  if(_touchDragTimer && e.touches.length === 1){
+    const t = e.touches[0];
+    if(Math.hypot(t.clientX-_touchDragStartX, t.clientY-_touchDragStartY) > 10){
+      clearTimeout(_touchDragTimer); _touchDragTimer = null;
+    }
+  }
+  if(!_placaArrastrandoId) return;
+  if(e.touches.length === 1){
+    // 1 dedo: trasladar placa (path táctil para iOS tras pointercancel)
+    const t = e.touches[0];
+    const rect = renderer.domElement.getBoundingClientRect();
+    const px = ((t.clientX-rect.left)/rect.width)*2-1;
+    const py = -((t.clientY-rect.top)/rect.height)*2+1;
+    raycaster.setFromCamera({x:px,y:py}, camera);
+    const _tgt = new THREE.Vector3();
+    const modelo = modelos[_placaArrastrandoId];
+    if(modelo && raycaster.ray.intersectPlane(_planoArrastre, _tgt)){
+      const newPos = _tgt.clone().sub(_arrastreOffset);
+      if(_placaCenter) _placaCenter.add(newPos.clone().sub(modelo.position));
+      modelo.position.copy(newPos);
+      needsRender = true;
+    }
+  } else if(e.touches.length >= 2){
+    // 2+ dedos: pinch → profundidad
+    const t0=e.touches[0], t1=e.touches[1];
+    const d = Math.hypot(t1.clientX-t0.clientX, t1.clientY-t0.clientY);
+    if(_prevPinchDistTouch > 0) _moverPlacaProfundidad(_placaArrastrandoId, (d-_prevPinchDistTouch)*0.0065);
+    _prevPinchDistTouch = d;
+  }
 }, {passive:true});
 renderer.domElement.addEventListener('touchend', e=>{
   if(e.touches.length<2) _prevPinchDistTouch=0;
-  // iOS: cleanup de arrastre cuando no dispara pointerup tras pointercancel
   if(_arrastrandoTimer){ clearTimeout(_arrastrandoTimer); _arrastrandoTimer=null; }
+  if(_touchDragTimer){ clearTimeout(_touchDragTimer); _touchDragTimer=null; }
   if(_placaArrastrandoId && e.touches.length===0){
     _setPlacaGlow(_placaArrastrandoId,false); _eliminarIndicadorFondo(); _ocultarHint(); _eliminarOverlayColision();
     _modoGiroZ=false; _giroZEsTop=false; _giroZPivot=null; _modoGiroY=false; _giroYEsLeft=false; _giroYPivot=null; _placaCenter=null;
@@ -3235,7 +3280,10 @@ renderer.domElement.addEventListener('touchend', e=>{
     _placaArrastrandoId=null;
   }
 }, {passive:true});
-renderer.domElement.addEventListener('touchcancel', e=>{ _prevPinchDistTouch=0; }, {passive:true});
+renderer.domElement.addEventListener('touchcancel', e=>{
+  _prevPinchDistTouch=0;
+  if(_touchDragTimer){ clearTimeout(_touchDragTimer); _touchDragTimer=null; }
+}, {passive:true});
 animate();
 controls.addEventListener('change', ()=>{ needsRender = true; });
 window.addEventListener('resize',()=>{
@@ -4638,7 +4686,8 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
   }
 
   void _limpiarVisor() {
-    // Limpiar estado Dart
+    // Limpiar
+    // estado Dart
     setState(() {
       for (final k in _visibles.keys) _visibles[k] = false;
       for (final k in _trayectoriasVis.keys) _trayectoriasVis[k] = true;
