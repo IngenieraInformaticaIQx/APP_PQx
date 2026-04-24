@@ -347,6 +347,7 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
   int  _notaCounter    = 0;
   final ValueNotifier<int> _notasVersion = ValueNotifier(0);
   Completer<Map<String, dynamic>>? _estadoVisorCompleter;
+  Map<String, dynamic>? _visorStateCache; // último estado 3D conocido (posiciones/cámara)
 
   // Vistas rápidas
   bool _vistasPanelVisible = false;
@@ -415,6 +416,11 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
         _placaArrastrandoActiva = activa;
         _placaDesplazamiento = desplazamiento;
       });
+
+      // Al soltar la placa, exportar estado JS al caché para poder guardarlo al salir
+      if (!activa) {
+        _jsRun('if(window.visor&&window.visor.exportarEstadoVisor)window.visor.exportarEstadoVisor();');
+      }
     } catch (_) {}
   }
 
@@ -648,6 +654,7 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
         })..addJavaScriptChannel('EstadoVisor', onMessageReceived: (msg) {
           try {
             final data = jsonDecode(msg.message) as Map<String, dynamic>;
+            _visorStateCache = data; // siempre actualizar caché
             _estadoVisorCompleter?.complete(data);
             _estadoVisorCompleter = null;
           } catch (_) {}
@@ -767,6 +774,7 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
         'colores': coloresJson,
         'desplazamiento': despJson,
         'audio_notas_id': _audioNotasId,
+        if (_visorStateCache != null) 'visor_state': _visorStateCache!,
       }));
     });
   }
@@ -4044,6 +4052,14 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
                   onPlacaArrastrando: (msg) {
                     _actualizarEstadoPlacaArrastrando(msg, haptics: true);
                   },
+                  onEstadoVisor: (msg) {
+                    try {
+                      final data = jsonDecode(msg) as Map<String, dynamic>;
+                      _visorStateCache = data;
+                      _estadoVisorCompleter?.complete(data);
+                      _estadoVisorCompleter = null;
+                    } catch (_) {}
+                  },
                       )
                     : WebViewWidget(
                   controller: _webController,
@@ -5144,6 +5160,7 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
     await prefs.setString('estado_caso_${widget.caso.id}', json.encode({
       'capas_visibles': capasVisibles,
       'tornillos_sesion_actual': tornillos,
+      if (_visorStateCache != null) 'visor_state': _visorStateCache!,
     }));
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
