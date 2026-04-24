@@ -41,20 +41,25 @@ import WebKit
 
   private func findAndConfigureWKWebViews(in view: UIView) {
     if let wkWebView = view as? WKWebView {
-      if #available(iOS 16.0, *) {
-        wkWebView.textInteractionEnabled = false
-      } else {
-        // Pre-iOS 16: deshabilitar UILongPressGestureRecognizer en el WKWebView y su scrollView
-        let views: [UIView] = [wkWebView, wkWebView.scrollView]
-        for v in views {
-          for gr in v.gestureRecognizers ?? [] {
-            if gr is UILongPressGestureRecognizer {
+      let views: [UIView] = [wkWebView, wkWebView.scrollView]
+
+      for v in views {
+        for gr in v.gestureRecognizers ?? [] {
+          if gr is UILongPressGestureRecognizer ||
+              gr is UITapGestureRecognizer ||
+              gr is UIPanGestureRecognizer {
+            if String(describing: type(of: gr)).contains("Text") ||
+                gr is UILongPressGestureRecognizer {
               gr.isEnabled = false
             }
           }
         }
       }
+
+      wkWebView.isUserInteractionEnabled = true
+      wkWebView.scrollView.delaysContentTouches = false
     }
+
     for subview in view.subviews {
       findAndConfigureWKWebViews(in: subview)
     }
