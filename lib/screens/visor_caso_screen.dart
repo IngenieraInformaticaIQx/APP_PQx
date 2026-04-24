@@ -3218,7 +3218,14 @@ function animate(now){
 }
 document.addEventListener('contextmenu', e => e.preventDefault());
 document.addEventListener('selectstart', e => e.preventDefault());
-// CSS touch-action:none evita scroll/zoom; NO hacer preventDefault en touchstart (cancela pointer events en Android)
+// CSS touch-action:none evita scroll/zoom; NO hacer preventDefault en touchstart en Android (cancela pointer events)
+// En iOS/WKWebView sí necesitamos preventDefault en touchstart para que el reconocedor nativo de long press
+// no dispare pointercancel y cancele el timer de arrastre de placa. En Android no se aplica.
+const _isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+               (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+if(_isIOS){
+  renderer.domElement.addEventListener('touchstart', e => e.preventDefault(), {passive: false});
+}
 // Pinch de profundidad vía touch events (passive=true para no interferir con pointer events)
 let _prevPinchDistTouch = 0;
 renderer.domElement.addEventListener('touchmove', e=>{
