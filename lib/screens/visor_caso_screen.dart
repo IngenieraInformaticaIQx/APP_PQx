@@ -2704,7 +2704,6 @@ function _tryActivateDrag(screenX, screenY){
     _mostrarHint(false);
   }
   PlacaArrastrando.postMessage(JSON.stringify({id:modelId,active:true}));
-  _iniciarOverlayColision(modelId);
 }
 
 // ── Colisión placa-hueso: overlay rojo en zona de intersección ───────────────
@@ -2718,6 +2717,7 @@ const _overlayColMat = new THREE.MeshBasicMaterial({
 });
 
 function _iniciarOverlayColision(modelId){
+  return;
   _eliminarOverlayColision();
   modelos[modelId].traverse(c=>{
     if(!c.isMesh || c.userData.esTrayectoria || c.userData.esTornillo
@@ -2735,6 +2735,7 @@ function _iniciarOverlayColision(modelId){
 }
 
 function _eliminarOverlayColision(){
+  return;
   for(const { mesh, src } of _overlayColMeshes){
     src.remove(mesh);
     mesh.geometry.dispose();
@@ -2751,12 +2752,14 @@ function _puntoEnHueso(pt, meshes){
     new THREE.Vector3(0.17,-0.09,1).normalize(),
   ];
   const rc = new THREE.Raycaster();
+  return false;
   let v=0;
   for(const d of dirs){ rc.set(pt,d); if(rc.intersectObjects(meshes,false).length%2===1) v++; }
   return v>=2;
 }
 
 function _ejecutarColisionCheck(modelId){
+  return;
   _colCheckPending = false;
   if(!_placaArrastrandoId || !_overlayColMeshes.length) return;
 
@@ -2809,9 +2812,8 @@ function _ejecutarColisionCheck(modelId){
 }
 
 function _actualizarOverlayColision(modelId){
-  if(_colCheckPending) return;
-  _colCheckPending = true;
-  setTimeout(()=>_ejecutarColisionCheck(modelId), 150);
+  return;
+  // Desactivado temporalmente
 }
 
 renderer.domElement.addEventListener('pointerdown', e=>{
@@ -2871,7 +2873,6 @@ renderer.domElement.addEventListener('pointermove', e=>{
     if(d > _arrastreMaxDist) _arrastreMaxDist = d;
   }
   if(!_placaArrastrandoId) return;
-  _actualizarOverlayColision(_placaArrastrandoId);
 
   const modelo = modelos[_placaArrastrandoId];
   if(!modelo) return;
@@ -3018,7 +3019,6 @@ renderer.domElement.addEventListener('pointerup', e=>{
     _setPlacaGlow(_placaArrastrandoId, false);
     _eliminarIndicadorFondo();
     _ocultarHint();
-    _eliminarOverlayColision();
     _modoGiroZ = false; _giroZEsTop = false; _giroZPivot = null;
     _modoGiroY = false; _giroYEsLeft = false; _giroYPivot = null;
     _placaCenter = null;
@@ -3255,7 +3255,6 @@ function _finishPlacaDrag(){
   _setPlacaGlow(_placaArrastrandoId,false);
   _eliminarIndicadorFondo();
   _ocultarHint();
-  _eliminarOverlayColision();
   _modoGiroZ=false; _giroZEsTop=false; _giroZPivot=null;
   _modoGiroY=false; _giroYEsLeft=false; _giroYPivot=null;
   _placaCenter=null;
