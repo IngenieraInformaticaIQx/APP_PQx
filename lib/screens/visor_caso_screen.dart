@@ -425,6 +425,10 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
         ..addJavaScriptChannel('VisorReady', onMessageReceived: (_) {
           if (!mounted) return;
           setState(() => _visorListo = true);
+          if (Platform.isIOS) {
+            const MethodChannel('visor/webview_config')
+                .invokeMethod('disableTextInteraction');
+          }
           _jsRun('window.visor.setBackground(${AppTheme.isDark.value});');
 
           final numBio = widget.caso.biomodelos.length;
@@ -3211,13 +3215,16 @@ function animate(now){
 }
 document.addEventListener('contextmenu', e => e.preventDefault());
 document.addEventListener('selectstart', e => e.preventDefault());
-// CSS touch-action:none evita scroll/zoom; NO hacer preventDefault en touchstart en Android (cancela pointer events)
-// En iOS/WKWebView sí necesitamos preventDefault en touchstart para que el reconocedor nativo de long press
-// no dispare pointercancel y cancele el timer de arrastre de placa. En Android no se aplica.
-const _isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
-               (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+// Reactive: borrar selección de texto en el instante en que iOS la crea
+document.addEventListener('selectionchange', () => { try{ window.getSelection().removeAllRanges(); }catch(_){} });
+// iOS/WKWebView: preventDefault en touchstart a nivel document evita que UITextInteraction
+// nativo active la selección de texto en long press. Sólo iOS: en Android esto cancela pointer events.
+// Detección amplia para cubrir iPhone, iPad antiguo (UA "iPad") e iPad moderno (UA "MacIntel" + maxTouchPoints).
+const _isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent) ||
+               (/MacIntel|MacARM/.test(navigator.platform) && navigator.maxTouchPoints > 1) ||
+               (navigator.vendor === 'Apple Computer, Inc.' && 'ontouchstart' in window);
 if(_isIOS){
-  renderer.domElement.addEventListener('touchstart', e => e.preventDefault(), {passive: false});
+  document.addEventListener('touchstart', e => e.preventDefault(), {passive: false});
 }
 // Pinch de profundidad + traslación táctil (passive=true)
 let _prevPinchDistTouch = 0;
