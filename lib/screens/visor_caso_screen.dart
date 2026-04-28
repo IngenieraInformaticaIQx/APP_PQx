@@ -1557,8 +1557,8 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
   <button type="button" data-plate-mode="tilt"><span class="mode-ico">⤡</span><span class="mode-lbl">Inclinar</span></button>
   <button type="button" data-plate-mode="lean"><span class="mode-ico">⟲</span><span class="mode-lbl">Ladear</span></button>
   <button type="button" data-plate-mode="pend"><span class="mode-ico">↔</span><span class="mode-lbl">Lat.</span></button>
-  <button type="button" data-plate-mode="pend-sup"><span class="mode-ico">⬆</span><span class="mode-lbl">Sup.</span></button>
-  <button type="button" data-plate-mode="pend-inf"><span class="mode-ico">⬇</span><span class="mode-lbl">Inf.</span></button>
+  <button type="button" data-plate-mode="pend-sup"><span class="mode-ico">↑</span><span class="mode-lbl">Sup.</span></button>
+  <button type="button" data-plate-mode="pend-inf"><span class="mode-ico">↓</span><span class="mode-lbl">Inf.</span></button>
 </div>
 <div id="loading"><div class="spinner"></div><span>Cargando modelo…</span></div>
 <div id="watermark"><div class="wm-nombre" id="wm-nombre"></div><div class="wm-paciente" id="wm-paciente"></div></div>
@@ -7241,7 +7241,7 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
     final padding = MediaQuery.of(context).padding;
 
     return Positioned(
-      top: padding.top +30.0,
+      top: 72.0,
       left: 110,
       right: 15,
       child: GestureDetector(
