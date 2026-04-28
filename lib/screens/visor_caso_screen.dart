@@ -160,7 +160,14 @@ class Medicion3D {
   final String id;
   double mm;
   bool visible;
-  Medicion3D({required this.id, required this.mm, this.visible = true});
+  final double? x1, y1, z1, x2, y2, z2;
+  Medicion3D({
+    required this.id,
+    required this.mm,
+    this.visible = true,
+    this.x1, this.y1, this.z1,
+    this.x2, this.y2, this.z2,
+  });
 }
 
 class Nota3D {
@@ -194,6 +201,8 @@ class TornilloColocado {
   final String glbId;
   final String nombre;
   final String cilindroId;
+  final String cilindroNombre;
+  final String placaGlbId;
   final double largo;
   final double hx, hy, hz;
   final double hnx, hny, hnz;
@@ -206,6 +215,8 @@ class TornilloColocado {
     required this.glbId,
     required this.nombre,
     this.cilindroId = '',
+    this.cilindroNombre = '',
+    this.placaGlbId = '',
     this.largo = 0,
     this.hx = 0, this.hy = 0, this.hz = 0,
     this.hnx = 0, this.hny = 0, this.hnz = 0,
@@ -222,6 +233,7 @@ class _TapData {
   final double nx, ny, nz;
   final double sx, sy;
   final String? cilindroId;
+  final String? cilindroNombre;
   final double dx, dy, dz; // dirección de inserción (hacia dentro)
   final bool usarTrayectoria;
   _TapData({
@@ -229,6 +241,7 @@ class _TapData {
     required this.nx, required this.ny, required this.nz,
     required this.sx, required this.sy,
     this.cilindroId,
+    this.cilindroNombre,
     this.dx = 0, this.dy = 0, this.dz = 0,
     this.usarTrayectoria = false,
   });
@@ -237,6 +250,7 @@ class _TapData {
     nx: (j['nx'] as num).toDouble(), ny: (j['ny'] as num).toDouble(), nz: (j['nz'] as num).toDouble(),
     sx: (j['sx'] as num).toDouble(), sy: (j['sy'] as num).toDouble(),
     cilindroId: j['cilindroId'] as String?,
+    cilindroNombre: j['cilindroNombre'] as String?,
     dx: (j['dx'] as num? ?? 0).toDouble(),
     dy: (j['dy'] as num? ?? 0).toDouble(),
     dz: (j['dz'] as num? ?? 0).toDouble(),
@@ -556,6 +570,8 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
                 glbId: data['glbId'] ?? '',
                 nombre: nombre,
                 cilindroId: data['cilindroId'] as String? ?? '',
+                cilindroNombre: data['cilindroNombre'] as String? ?? '',
+                placaGlbId: data['placaGlbId'] as String? ?? '',
                 largo: _largoDesdeNombre(nombre),
                 hx: tap?.x ?? 0, hy: tap?.y ?? 0, hz: tap?.z ?? 0,
                 hnx: tap?.nx ?? 0, hny: tap?.ny ?? 0, hnz: tap?.nz ?? 0,
@@ -612,10 +628,21 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
             final d = jsonDecode(msg.message) as Map<String, dynamic>;
             final mm = (d['mm'] as num).toDouble();
             final mid = d['id'] as String? ?? 'med_${_medicionCounter++}';
+            final p1 = d['p1'] as Map<String, dynamic>?;
+            final p2 = d['p2'] as Map<String, dynamic>?;
             setState(() {
               _reglaLibreMm = mm;
               _modoRegla = false;
-              _mediciones.add(Medicion3D(id: mid, mm: mm));
+              _mediciones.add(Medicion3D(
+                id: mid,
+                mm: mm,
+                x1: (p1?['x'] as num?)?.toDouble(),
+                y1: (p1?['y'] as num?)?.toDouble(),
+                z1: (p1?['z'] as num?)?.toDouble(),
+                x2: (p2?['x'] as num?)?.toDouble(),
+                y2: (p2?['y'] as num?)?.toDouble(),
+                z2: (p2?['z'] as num?)?.toDouble(),
+              ));
             });
             _medicionesVersion.value++;
             _jsRun("window.visor.setModoRegla(false);");
@@ -680,10 +707,35 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
     final pacienteEsc = widget.caso.paciente.replaceAll("'", "");
     _jsRun("document.getElementById('wm-nombre').textContent='$nombreEsc';");
     _jsRun("document.getElementById('wm-paciente').textContent='$pacienteEsc';");
-    if (widget.autoCargar) {
+    if (widget.sesionGuardada != null) {
+      _credencialesFuture.then((_) async {
+        if (!mounted) return;
+        await _restaurarSesionCompleta(widget.sesionGuardada!);
+      });
+    } else if (!widget.autoCargar && widget.planLocal != null) {
+      _credencialesFuture.then((_) async {
+        if (!mounted) return;
+        await _restaurarSesionPlan();
+      });
+    } else if (widget.autoCargar && widget.planLocal == null) {
+      _credencialesFuture.then((_) async {
+        if (!mounted) return;
+        final prefs = await SharedPreferences.getInstance();
+        if (prefs.containsKey('estado_caso_${widget.caso.id}')) {
+          await _restaurarEstadoCaso();
+        } else {
+          await _autoCargarTodo();
+        }
+      });
+    } else if (widget.autoCargar) {
       _credencialesFuture.then((_) async {
         if (!mounted) return;
         await _autoCargarTodo();
+      });
+    } else if (!widget.modoGenerico) {
+      _credencialesFuture.then((_) async {
+        if (!mounted) return;
+        await _restaurarEstadoCaso();
       });
     }
   }
@@ -735,16 +787,24 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
     }
     final tornillosCompletos = _tornillosColocados.map((t) => {
       'instanceId': t.instanceId, 'glbId': t.glbId, 'nombre': t.nombre,
-      'cilindroId': t.cilindroId, 'largo_mm': t.largo,
+      'cilindroId': t.cilindroId, 'cilindroNombre': t.cilindroNombre,
+      'placaGlbId': t.placaGlbId, 'largo_mm': t.largo,
       'hx': t.hx, 'hy': t.hy, 'hz': t.hz,
       'hnx': t.hnx, 'hny': t.hny, 'hnz': t.hnz,
       'hdx': t.hdx, 'hdy': t.hdy, 'hdz': t.hdz,
       'usarTrayectoria': t.usarTrayectoria,
+      'visible': t.visible,
+      'reglaVisible': t.reglaVisible,
     }).toList();
 
     final notasJson = _notas.map((n) => {
       'id': n.id, 'texto': n.texto,
       'x': n.x, 'y': n.y, 'z': n.z, 'visible': n.visible,
+    }).toList();
+    final medicionesJson = _mediciones.map((m) => {
+      'id': m.id, 'mm': m.mm, 'visible': m.visible,
+      'x1': m.x1, 'y1': m.y1, 'z1': m.z1,
+      'x2': m.x2, 'y2': m.y2, 'z2': m.z2,
     }).toList();
     final opacidadesJson = <String, dynamic>{};
     _opacidades.forEach((k, v) => opacidadesJson[k.toString()] = v);
@@ -774,9 +834,11 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
         'tornillos': tornillosCompletos,
         'tornillos_sesion_actual': tornillosCompletos, // compatibilidad
         'notas': notasJson,
+        'mediciones': medicionesJson,
         'opacidades': opacidadesJson,
         'colores': coloresJson,
         'desplazamiento': despJson,
+        'ghost_visible': _ghostVisible,
         'audio_notas_id': _audioNotasId,
         if (_visorStateCache != null) 'visor_state': _visorStateCache!,
       }));
@@ -968,6 +1030,7 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
       'nx': tap.nx, 'ny': tap.ny, 'nz': tap.nz,
       'dx': tap.dx, 'dy': tap.dy, 'dz': tap.dz,
       'cilindroId': tap.cilindroId,
+      'cilindroNombre': tap.cilindroNombre,
       'usarTrayectoria': tap.usarTrayectoria,
     });
     final escaped = payload.replaceAll("'", "\\'");
@@ -989,7 +1052,7 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
   }
 
   /// Coloca un tornillo en la escena JS bajo demanda (cuando viene de sesión restaurada).
-  Future<void> _colocarTornilloEnEscena(TornilloColocado tc) async {
+  Future<void> _colocarTornilloEnEscena(TornilloColocado tc, {String? placaGlbId}) async {
     if (tc.glbId.isEmpty) return;
     if (tc.hx == 0 && tc.hy == 0 && tc.hz == 0) return; // sin coordenadas guardadas
 
@@ -998,17 +1061,21 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
     final catIdx = int.parse(catMatch.group(1)!);
     if (catIdx >= widget.caso.todosTornillos.length) return;
 
+    final completer = Completer<void>();
+    _tornilloListoCompleters[tc.glbId] = completer;
+
     // Descargar catálogo si no está en caché
     if (!_catCache.containsKey(catIdx)) {
       await _descargarTornilloCatalogo(catIdx);
-      if (!_catCache.containsKey(catIdx)) return;
+      if (!_catCache.containsKey(catIdx)) {
+        _tornilloListoCompleters.remove(tc.glbId);
+        return;
+      }
     } else {
       _jsRun("window.visor.registrarTornillo('${tc.glbId}','${_catCache[catIdx]}');");
     }
 
     // Esperar confirmación JS
-    final completer = Completer<void>();
-    _tornilloListoCompleters[tc.glbId] = completer;
     await completer.future.timeout(
       const Duration(seconds: 10),
       onTimeout: () => _tornilloListoCompleters.remove(tc.glbId),
@@ -1023,8 +1090,11 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
       'x':  tc.hx,  'y':  tc.hy,  'z':  tc.hz,
       'nx': tc.hnx, 'ny': tc.hny, 'nz': tc.hnz,
       'dx': tc.hdx, 'dy': tc.hdy, 'dz': tc.hdz,
-      'cilindroId': '',
+      'cilindroId': tc.cilindroId,
+      'cilindroNombre': tc.cilindroNombre,
+      'placaGlbId': placaGlbId ?? tc.placaGlbId,
       'usarTrayectoria': tc.usarTrayectoria,
+      'noAnim': true,
     });
     _jsRun("window.visor.insertarTornillo('${payload.replaceAll("'", "\\'")}');");
   }
@@ -1078,6 +1148,19 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
   void _jsNotaRemove(String id) => _jsRun("window.visor.removeNota('$id');");
   void _jsNotaModo(bool v) => _jsRun("window.visor.setModoNota($v);");
   void _jsModoRegla(bool v) => _jsRun("window.visor.setModoRegla($v);");
+  void _jsAddReglaLibre(Medicion3D m) {
+    if (m.x1 == null || m.y1 == null || m.z1 == null ||
+        m.x2 == null || m.y2 == null || m.z2 == null) return;
+    final payload = jsonEncode({
+      'id': m.id,
+      'visible': m.visible,
+      'p1': {'x': m.x1, 'y': m.y1, 'z': m.z1},
+      'p2': {'x': m.x2, 'y': m.y2, 'z': m.z2},
+    });
+    final payloadB64 = base64Encode(utf8.encode(payload));
+    _jsRun("if(window.visor&&window.visor.addReglaLibre)"
+        "window.visor.addReglaLibre(JSON.parse(atob('$payloadB64')));");
+  }
   void _jsToggleReglaLibre(String id, bool v) => _jsRun("window.visor.toggleReglaLibre('$id',$v);");
   void _jsEliminarReglaLibre(String id) => _jsRun("window.visor.eliminarReglaLibre('$id');");
 
@@ -1249,6 +1332,13 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
     final capas = (sesion['capas_visibles'] as List? ?? [])
         .cast<Map<String, dynamic>>();
     final indices = capas.map((c) => c['indice'] as int?).whereType<int>().toSet();
+    if (mounted) {
+      setState(() {
+        for (final i in _visibles.keys) {
+          _visibles[i] = indices.contains(i);
+        }
+      });
+    }
     for (final i in indices) {
       if (!_visibles.containsKey(i)) continue;
       if (_glbCache.containsKey(i)) {
@@ -1276,6 +1366,8 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
         glbId: t['glbId'] as String? ?? '',
         nombre: t['nombre'] as String? ?? '',
         cilindroId: t['cilindroId'] as String? ?? '',
+        cilindroNombre: t['cilindroNombre'] as String? ?? '',
+        placaGlbId: t['placaGlbId'] as String? ?? '',
         largo: (t['largo_mm'] as num? ?? 0).toDouble(),
         hx: (t['hx'] as num? ?? 0).toDouble(),
         hy: (t['hy'] as num? ?? 0).toDouble(),
@@ -1311,11 +1403,42 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
 
     // 3. Restaurar posiciones/rotaciones de modelos + cámara en JS
     final visorState = sesion['visor_state'];
+    final visorModelos = visorState is Map
+        ? (visorState['modelos'] as Map?)?.cast<String, dynamic>()
+        : null;
+
+    if (visorState != null) {
+      final visorStateB64 = base64Encode(utf8.encode(json.encode(visorState)));
+      _jsRun("if(window.visor&&window.visor.restaurarEstadoVisor)"
+          "window.visor.restaurarEstadoVisor(JSON.parse(atob('$visorStateB64')));");
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+      if (!mounted) return;
+    }
+
+    for (final tc in List<TornilloColocado>.from(_tornillosColocados)) {
+      if (!_instanciasEnEscena.contains(tc.instanceId)) {
+        final modelState = visorModelos?[tc.instanceId];
+        final placaGlbIdState = modelState is Map
+            ? modelState['placaGlbId'] as String?
+            : null;
+        final placaGlbId = (placaGlbIdState != null && placaGlbIdState.isNotEmpty)
+            ? placaGlbIdState
+            : tc.placaGlbId;
+        await _colocarTornilloEnEscena(tc, placaGlbId: placaGlbId);
+      }
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 250));
+    if (!mounted) return;
+
     if (visorState != null) {
       // Usar JSON.parse dentro de JS para evitar problemas de escape
       final visorStateB64 = base64Encode(utf8.encode(json.encode(visorState)));
       _jsRun("if(window.visor&&window.visor.restaurarEstadoVisor)"
           "window.visor.restaurarEstadoVisor(JSON.parse(atob('$visorStateB64')));");
+    }
+    for (final tc in _tornillosColocados) {
+      _jsRun("window.visor.toggleGlb('${tc.instanceId}',${tc.visible});");
+      _jsRun("window.visor.toggleRegla('${tc.instanceId}',${tc.visible && tc.reglaVisible});");
     }
 
     // 4. Restaurar opacidades
@@ -1356,6 +1479,34 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
       if (!nota.visible) _jsNotaToggle(nota.id, false);
     }
     _notasVersion.value++;
+
+    final mediciones = (sesion['mediciones'] as List? ?? []).cast<Map<String, dynamic>>();
+    for (final m in mediciones) {
+      final medicion = Medicion3D(
+        id: m['id'] as String? ?? 'med_${_medicionCounter++}',
+        mm: (m['mm'] as num? ?? 0).toDouble(),
+        visible: m['visible'] as bool? ?? true,
+        x1: (m['x1'] as num?)?.toDouble(),
+        y1: (m['y1'] as num?)?.toDouble(),
+        z1: (m['z1'] as num?)?.toDouble(),
+        x2: (m['x2'] as num?)?.toDouble(),
+        y2: (m['y2'] as num?)?.toDouble(),
+        z2: (m['z2'] as num?)?.toDouble(),
+      );
+      _mediciones.add(medicion);
+      _jsAddReglaLibre(medicion);
+    }
+    _medicionesVersion.value++;
+
+    if (sesion.containsKey('ghost_visible')) {
+      final ghostVisible = sesion['ghost_visible'] as bool? ?? true;
+      setState(() => _ghostVisible = ghostVisible);
+      _jsRun('if(window.visor&&window.visor.toggleGhost)window.visor.toggleGhost($ghostVisible);');
+    } else if (visorState is Map && visorState['ghost_visible'] is bool) {
+      final ghostVisible = visorState['ghost_visible'] as bool;
+      setState(() => _ghostVisible = ghostVisible);
+      _jsRun('if(window.visor&&window.visor.toggleGhost)window.visor.toggleGhost($ghostVisible);');
+    }
 
     // 7. Restaurar desplazamiento mostrado
     final desp = sesion['desplazamiento'] as Map<String, dynamic>?;
@@ -2073,8 +2224,8 @@ function cargarGlbBase64(id, b64){
             c.material = c.material.clone();
             c.material.transparent = true;
             c.material.opacity = 0.45;
-            c.material.color = new THREE.Color(0x2196F3);
             c.material.depthWrite = false;
+            c.material.needsUpdate = true;
           }
           // Guardar: posición mundial y dirección del eje largo (local Y → mundo)
           c.updateMatrixWorld(true);
@@ -2225,6 +2376,8 @@ function insertarTornillo(jsonStr){
     }
   });
   tornilloScene.userData.esTornillo = true;
+  tornilloScene.userData.cilindroId = d.cilindroId || '';
+  tornilloScene.userData.cilindroNombre = d.cilindroNombre || '';
 
   // Medir eje largo LOCAL del tornillo en reposo (antes de cualquier orientación)
   tornilloScene.position.set(0,0,0); tornilloScene.rotation.set(0,0,0); tornilloScene.updateMatrixWorld(true);
@@ -2331,7 +2484,7 @@ tornilloScene.position.copy(hitPoint)
   }
 
   tornilloScene.userData.instanceId = d.instanceId;
-  const _tGlbId = _findPlacaGlbId(d.x, d.y, d.z);
+  const _tGlbId = d.placaGlbId || _findPlacaGlbId(d.x, d.y, d.z);
   tornilloScene.userData.placaGlbId = _tGlbId;
   // Añadir primero a la escena (posición en world space), luego reparentar a la placa.
   // attach() convierte automáticamente a espacio local de la placa preservando la posición mundo.
@@ -2346,6 +2499,7 @@ tornilloScene.position.copy(hitPoint)
 
   // Animación de roscado: viene desde fuera (hacia cámara) y entra girando.
   // Usa _preLocalAxis/_preLargo medidos ANTES de orientar (espacio local real del tornillo).
+  if(!d.noAnim){
   const _saEndQuat = tornilloScene.quaternion.clone();
   const _saEndPos  = tornilloScene.position.clone();
   tornilloScene.updateWorldMatrix(true, false);
@@ -2372,15 +2526,12 @@ tornilloScene.position.copy(hitPoint)
     dur:  1100,
     turns: 3,
   });
+  }
 
   _invalidarCacheMeshes();
 
   // Ocultar el cilindro guía que fue tocado
-  if(d.cilindroId){
-    scene.traverse(c => {
-      if(c.uuid === d.cilindroId) c.visible = false;
-    });
-  }
+  _setTrayectoriaOcupada(_tGlbId, d.cilindroId || '', d.cilindroNombre || '', true);
 
   // Largo real desde el modelo 3D (para la regla visual)
   const boxL = new THREE.Box3().setFromObject(tornilloScene);
@@ -2392,6 +2543,8 @@ tornilloScene.position.copy(hitPoint)
     glbId:      d.catId,
     nombre:     d.nombre,
     cilindroId: d.cilindroId || '',
+    cilindroNombre: d.cilindroNombre || '',
+    placaGlbId: _tGlbId || '',
   }));
 
   VisorLog.postMessage('Insertado: '+d.instanceId+' en pos='+tornilloScene.position.x.toFixed(1)+','+tornilloScene.position.y.toFixed(1)+','+tornilloScene.position.z.toFixed(1));
@@ -2399,6 +2552,10 @@ tornilloScene.position.copy(hitPoint)
 
 // ── Regla 3D ─────────────────────────────────────────────────────────────
 const _reglas = {}; // instanceId → Group (linea + sprite)
+
+let _guiasGlobalVisible = true;
+const _trayectoriasGlbVisibles = {};
+const _trayectoriasOcupadas = new Set();
 
 function _parsearTornillo(nombre){
   // Quitar extensión
@@ -2529,19 +2686,63 @@ function eliminarRegla(instanceId){
 // ── Eliminar tornillo ──────────────────────────────────────────────────────
 function eliminarTornillo(instanceId){
   const obj = modelos[instanceId]; if(!obj) return;
+  const cilindroId = obj.userData.cilindroId || '';
+  const cilindroNombre = obj.userData.cilindroNombre || '';
+  const placaGlbId = obj.userData.placaGlbId || '';
   obj.removeFromParent();
   obj.traverse(c=>{ if(c.isMesh){ c.geometry.dispose(); c.material.dispose(); } });
   delete modelos[instanceId];
+  _setTrayectoriaOcupada(placaGlbId, cilindroId, cilindroNombre, false);
   _invalidarCacheMeshes();
+  needsRender = true;
 }
 
 // ── Standard ──────────────────────────────────────────────────────────────
 // Oculta/muestra solo la geometría de la placa, respetando visibilidad de trayectorias
+function _trayectoriaKey(obj){
+  let placaId = '';
+  let p = obj.parent;
+  while(p){
+    if(p.userData && p.userData.glbId){ placaId = p.userData.glbId; break; }
+    p = p.parent;
+  }
+  return (placaId || '') + ':' + (obj.name || obj.uuid);
+}
+
+function _setTrayectoriaOcupada(placaGlbId, cilindroId, cilindroNombre, ocupada){
+  let target = null;
+  const root = placaGlbId && modelos[placaGlbId] ? modelos[placaGlbId] : scene;
+  root.traverse(c => {
+    if(target || !c.userData.esTrayectoria) return;
+    if((cilindroId && c.uuid === cilindroId) || (cilindroNombre && c.name === cilindroNombre)) target = c;
+  });
+  if(!target) return;
+  const key = _trayectoriaKey(target);
+  if(ocupada) _trayectoriasOcupadas.add(key);
+  else _trayectoriasOcupadas.delete(key);
+  target.visible = !ocupada && _guiasGlobalVisible && _trayectoriaGlbVisible(target);
+}
+
+function _trayectoriaGlbVisible(obj){
+  let p = obj.parent;
+  while(p){
+    if(p.userData && p.userData.glbId) {
+      return _trayectoriasGlbVisibles[p.userData.glbId] !== false;
+    }
+    p = p.parent;
+  }
+  return true;
+}
+
 function toggleGlb(id,v){
   if(!modelos[id]) return;
   if(v){
     modelos[id].visible = true;
-    modelos[id].traverse(c=>{ c.visible = true; });
+    modelos[id].traverse(c=>{
+      c.visible = c.userData.esTrayectoria
+        ? _guiasGlobalVisible && _trayectoriaGlbVisible(c) && !_trayectoriasOcupadas.has(_trayectoriaKey(c))
+        : true;
+    });
   } else {
     modelos[id].traverse(c=>{
       if(c.isMesh && !c.userData.esTrayectoria) c.visible = false;
@@ -2551,12 +2752,14 @@ function toggleGlb(id,v){
   _invalidarCacheMeshes();
 }
 function toggleGuias(v){
-  scene.traverse(c=>{ if(c.userData.esTrayectoria) c.visible=v; });
+  _guiasGlobalVisible = v;
+  scene.traverse(c=>{ if(c.userData.esTrayectoria) c.visible=v && !_trayectoriasOcupadas.has(_trayectoriaKey(c)); });
   _invalidarCacheMeshes();
 }
 function toggleTrayectoriasGlb(id, v){
   if(!modelos[id]) return;
-  modelos[id].traverse(c=>{ if(c.userData.esTrayectoria) c.visible=v; });
+  _trayectoriasGlbVisibles[id] = v;
+  modelos[id].traverse(c=>{ if(c.userData.esTrayectoria) c.visible=v && _guiasGlobalVisible && !_trayectoriasOcupadas.has(_trayectoriaKey(c)); });
   _invalidarCacheMeshes();
 }
 function setOpacidad(id,op){
@@ -2716,11 +2919,11 @@ function setModoRegla(v){
 }
 
 function etiquetarRegla(id){
-  if(_reglaGroup){ _reglasGuardadas[id] = _reglaGroup; _reglaGroup = null; }
+  if(_reglaGroup){ _reglaGroup.userData.reglaId = id; _reglasGuardadas[id] = _reglaGroup; _reglaGroup = null; }
 }
 
 function toggleReglaLibre(id, visible){
-  if(_reglasGuardadas[id]) _reglasGuardadas[id].visible = visible;
+  if(_reglasGuardadas[id]){ _reglasGuardadas[id].visible = visible; needsRender = true; }
 }
 
 function eliminarReglaLibre(id){
@@ -2734,6 +2937,8 @@ function _limpiarReglaLibre(){
 function _dibujarReglaLibre(p1, p2){
   _limpiarReglaLibre();
   const group = new THREE.Group();
+  group.userData.p1 = {x:p1.x, y:p1.y, z:p1.z};
+  group.userData.p2 = {x:p2.x, y:p2.y, z:p2.z};
   // Línea
   const mat = new THREE.LineBasicMaterial({color:0x64D2FF, depthTest:false, linewidth:2});
   const geo = new THREE.BufferGeometry().setFromPoints([p1,p2]);
@@ -2760,6 +2965,16 @@ function _dibujarReglaLibre(p1, p2){
   sp.position.copy(mid); sp.scale.set(8, 2.5, 1); sp.renderOrder=1001; group.add(sp);
   scene.add(group); _reglaGroup=group;
   return mm;
+}
+
+function addReglaLibre(data){
+  if(!data || !data.p1 || !data.p2 || !data.id) return;
+  const p1 = new THREE.Vector3(data.p1.x || 0, data.p1.y || 0, data.p1.z || 0);
+  const p2 = new THREE.Vector3(data.p2.x || 0, data.p2.y || 0, data.p2.z || 0);
+  _dibujarReglaLibre(p1, p2);
+  etiquetarRegla(data.id);
+  if(_reglasGuardadas[data.id]) _reglasGuardadas[data.id].visible = data.visible !== false;
+  needsRender = true;
 }
 
 // ── Notas 3D ─────────────────────────────────────────────────────────────
@@ -2930,6 +3145,7 @@ window.visor={
   setXray, setLuz, setColor, setPlanoCorte, setPlanoGlb, setVista,
   setModoNota, addNota, toggleNota, removeNota,
   setModoRegla, etiquetarRegla, toggleReglaLibre, eliminarReglaLibre,
+  addReglaLibre,
   toggleRegla, eliminarRegla, limpiarTodo,
   setBackground: function(dark){
     const c=document.createElement('canvas'); c.width=2; c.height=512;
@@ -2972,13 +3188,16 @@ window.visor={
     needsRender = true;
   },
   exportarEstadoVisor: function(){
-    const estado = { modelos: {}, camara: {}, colores: {} };
+    const estado = { modelos: {}, camara: {}, colores: {}, ghost_visible: _huellaVisible };
     for(const id in modelos){
       const m = modelos[id];
       estado.modelos[id] = {
         px: m.position.x, py: m.position.y, pz: m.position.z,
         qx: m.quaternion.x, qy: m.quaternion.y, qz: m.quaternion.z, qw: m.quaternion.w,
         visible: m.visible,
+        placaGlbId: m.userData.placaGlbId || '',
+        cilindroId: m.userData.cilindroId || '',
+        cilindroNombre: m.userData.cilindroNombre || '',
       };
       if(_coloresGlb[id] !== undefined) estado.colores[id] = _coloresGlb[id];
     }
@@ -3616,7 +3835,12 @@ renderer.domElement.addEventListener('pointerup', e=>{
         const mm = _dibujarReglaLibre(_reglaP1, pt);
         const rid = 'med_' + Date.now();
         etiquetarRegla(rid);
-        ReglaLibre.postMessage(JSON.stringify({mm: Math.round(mm*10)/10, id: rid}));
+        ReglaLibre.postMessage(JSON.stringify({
+          mm: Math.round(mm*10)/10,
+          id: rid,
+          p1: {x:_reglasGuardadas[rid].userData.p1.x, y:_reglasGuardadas[rid].userData.p1.y, z:_reglasGuardadas[rid].userData.p1.z},
+          p2: {x:_reglasGuardadas[rid].userData.p2.x, y:_reglasGuardadas[rid].userData.p2.y, z:_reglasGuardadas[rid].userData.p2.z}
+        }));
         _reglaP1 = null;
       }
     }
@@ -3741,6 +3965,7 @@ renderer.domElement.addEventListener('pointerup', e=>{
   let px = hit.point.x, py = hit.point.y, pz = hit.point.z;
   let fnx = nx, fny = ny, fnz = nz;
   let cilindroId = null;
+  let cilindroNombre = null;
 
   if(hit.object.userData.esTrayectoria){
     const obj = hit.object;
@@ -3784,6 +4009,7 @@ renderer.domElement.addEventListener('pointerup', e=>{
   ' dir=' + trayData.dir.x.toFixed(3) + ',' + trayData.dir.y.toFixed(3) + ',' + trayData.dir.z.toFixed(3)
 );
     cilindroId = obj.uuid;
+    cilindroNombre = obj.name || '';
     VisorLog.postMessage('Cilindro tocado: ' + obj.name + ' pos=' + px.toFixed(1)+','+py.toFixed(1)+','+pz.toFixed(1));
   }
 
@@ -3793,6 +4019,7 @@ renderer.domElement.addEventListener('pointerup', e=>{
     nx: fnx, ny: fny, nz: fnz,
     dx: fnx, dy: fny, dz: fnz, // dirección de inserción = opuesto a normal
     cilindroId: cilindroId,
+    cilindroNombre: cilindroNombre,
     usarTrayectoria: cilindroId !== null,
     sx: e.clientX, sy: e.clientY,
   }));
@@ -4285,7 +4512,8 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
 // Adaptador: convierte XYZ.postMessage(msg) en window.chrome.webview.postMessage({channel:'XYZ',msg:msg})
 (function(){
   const channels = ['VisorReady','PlateTapped','ScrewPlaced','VisorLog','TornilloListo',
-                    'CapturaVista','Captura','ReglaLibre','NotaTap','ScrewTapped','PlacaArrastrando'];
+                    'CapturaVista','Captura','ReglaLibre','NotaTap','ScrewTapped',
+                    'PlacaArrastrando','EstadoVisor'];
   channels.forEach(function(ch){
     window[ch] = { postMessage: function(m){ window.chrome.webview.postMessage(JSON.stringify({channel:ch,msg:m})); } };
   });
@@ -4339,10 +4567,12 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
                             setState(() {
                               _tornillosColocados.add(TornilloColocado(
                                 instanceId: instanceId,
-                                glbId: data['glbId'] ?? '',
-                                nombre: nombre,
-                                cilindroId: data['cilindroId'] as String? ?? '',
-                                largo: _largoDesdeNombre(nombre),
+                glbId: data['glbId'] ?? '',
+                nombre: nombre,
+                cilindroId: data['cilindroId'] as String? ?? '',
+                cilindroNombre: data['cilindroNombre'] as String? ?? '',
+                placaGlbId: data['placaGlbId'] as String? ?? '',
+                largo: _largoDesdeNombre(nombre),
                                 hx: tap?.x ?? 0, hy: tap?.y ?? 0, hz: tap?.z ?? 0,
                                 hnx: tap?.nx ?? 0, hny: tap?.ny ?? 0, hnz: tap?.nz ?? 0,
                                 hdx: tap?.dx ?? 0, hdy: tap?.dy ?? 0, hdz: tap?.dz ?? 0,
@@ -4359,6 +4589,33 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
                         onTornilloListo: (catId) {
                           _tornilloListoCompleters[catId]?.complete();
                           _tornilloListoCompleters.remove(catId);
+                        },
+                        onReglaLibre: (msg) {
+                          if (!mounted) return;
+                          try {
+                            final d = jsonDecode(msg) as Map<String, dynamic>;
+                            final mm = (d['mm'] as num).toDouble();
+                            final mid = d['id'] as String? ?? 'med_${_medicionCounter++}';
+                            final p1 = d['p1'] as Map<String, dynamic>?;
+                            final p2 = d['p2'] as Map<String, dynamic>?;
+                            setState(() {
+                              _reglaLibreMm = mm;
+                              _modoRegla = false;
+                              _mediciones.add(Medicion3D(
+                                id: mid,
+                                mm: mm,
+                                x1: (p1?['x'] as num?)?.toDouble(),
+                                y1: (p1?['y'] as num?)?.toDouble(),
+                                z1: (p1?['z'] as num?)?.toDouble(),
+                                x2: (p2?['x'] as num?)?.toDouble(),
+                                y2: (p2?['y'] as num?)?.toDouble(),
+                                z2: (p2?['z'] as num?)?.toDouble(),
+                              ));
+                            });
+                            _medicionesVersion.value++;
+                            _jsRun("window.visor.setModoRegla(false);");
+                            _autoAvanzarEstado('modificado');
+                          } catch (_) {}
                         },
                         onScrewTapped: (msg) {
                           if (!mounted) return;
@@ -5117,7 +5374,8 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
     // Tornillos con estado completo
     final tornillos = _tornillosColocados.map((t) => {
       'instanceId': t.instanceId, 'glbId': t.glbId, 'nombre': t.nombre,
-      'cilindroId': t.cilindroId, 'largo_mm': t.largo,
+      'cilindroId': t.cilindroId, 'cilindroNombre': t.cilindroNombre,
+      'placaGlbId': t.placaGlbId, 'largo_mm': t.largo,
       'hx': t.hx, 'hy': t.hy, 'hz': t.hz,
       'hnx': t.hnx, 'hny': t.hny, 'hnz': t.hnz,
       'hdx': t.hdx, 'hdy': t.hdy, 'hdz': t.hdz,
@@ -5130,6 +5388,11 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
       'id': n.id, 'texto': n.texto,
       'x': n.x, 'y': n.y, 'z': n.z,
       'visible': n.visible,
+    }).toList();
+    final mediciones = _mediciones.map((m) => {
+      'id': m.id, 'mm': m.mm, 'visible': m.visible,
+      'x1': m.x1, 'y1': m.y1, 'z1': m.z1,
+      'x2': m.x2, 'y2': m.y2, 'z2': m.z2,
     }).toList();
     // Opacidades
     final opacidades = <String, dynamic>{};
@@ -5150,9 +5413,11 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
       'capas_visibles': capasVisibles,
       'tornillos': tornillos,
       'notas': notas,
+      'mediciones': mediciones,
       'opacidades': opacidades,
       'colores': colores,
       'desplazamiento': desp,
+      'ghost_visible': _ghostVisible,
       'audio_notas_id': _audioNotasId,
       if (visorState != null) 'visor_state': visorState,
     };
@@ -5381,36 +5646,17 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
 
     final prefs = await SharedPreferences.getInstance();
     // Solo guardamos los tornillos de ESTA sesión (no el historial global del médico)
-    final sesionActual = _tornillosColocados.map((t) => {
-      'instanceId': t.instanceId,
-      'glbId':      t.glbId,
-      'nombre':     t.nombre,
-      'cilindroId': t.cilindroId,
-      'largo_mm':   t.largo,
-      'hx': t.hx, 'hy': t.hy, 'hz': t.hz,
-      'hnx': t.hnx, 'hny': t.hny, 'hnz': t.hnz,
-      'hdx': t.hdx, 'hdy': t.hdy, 'hdz': t.hdz,
-      'usarTrayectoria': t.usarTrayectoria,
-    }).toList();
-    final capasVisibles = <Map<String, dynamic>>[];
-    for (final entry in _visibles.entries) {
-      if (entry.value && entry.key < widget.caso.todosGlb.length) {
-        final glb = widget.caso.todosGlb[entry.key];
-        capasVisibles.add({
-          'indice': entry.key, 'nombre': glb.nombre,
-          'archivo': glb.archivo, 'tipo': glb.tipo, 'url': glb.url,
-        });
-      }
-    }
-
+    final sesionCompleta = await _construirSesionCompleta();
+    final sesionActual = (sesionCompleta['tornillos'] as List? ?? []);
+    final capasVisibles = (sesionCompleta['capas_visibles'] as List? ?? []);
     final sesionData = {
+      ...sesionCompleta,
       'id': DateTime.now().millisecondsSinceEpoch.toString(),
       'nombre': nombreConfirmado,
       'fecha': DateTime.now().toIso8601String(),
       'caso_origen': widget.caso.nombre,
       'num_tornillos': sesionActual.length,
       'num_capas': capasVisibles.length,
-      'capas_visibles': capasVisibles,
       'tornillos_sesion_actual': sesionActual,
       'audio_notas_id': _sessionAudioId,
       'caso': {
@@ -5438,30 +5684,9 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
 
   /// Guarda el estado actual del visor en el caso del servidor (sin dialog).
   Future<void> _guardarEnCaso() async {
-    final capasVisibles = <Map<String, dynamic>>[];
-    for (final entry in _visibles.entries) {
-      if (entry.value && entry.key < widget.caso.todosGlb.length) {
-        final glb = widget.caso.todosGlb[entry.key];
-        capasVisibles.add({
-          'indice': entry.key, 'nombre': glb.nombre,
-          'archivo': glb.archivo, 'tipo': glb.tipo, 'url': glb.url,
-        });
-      }
-    }
-    final tornillos = _tornillosColocados.map((t) => {
-      'instanceId': t.instanceId, 'glbId': t.glbId, 'nombre': t.nombre,
-      'cilindroId': t.cilindroId, 'largo_mm': t.largo,
-      'hx': t.hx, 'hy': t.hy, 'hz': t.hz,
-      'hnx': t.hnx, 'hny': t.hny, 'hnz': t.hnz,
-      'hdx': t.hdx, 'hdy': t.hdy, 'hdz': t.hdz,
-      'usarTrayectoria': t.usarTrayectoria,
-    }).toList();
+    final sesion = await _construirSesionCompleta();
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('estado_caso_${widget.caso.id}', json.encode({
-      'capas_visibles': capasVisibles,
-      'tornillos_sesion_actual': tornillos,
-      if (_visorStateCache != null) 'visor_state': _visorStateCache!,
-    }));
+    await prefs.setString('estado_caso_${widget.caso.id}', json.encode(sesion));
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
       content: Text('Caso guardado'),
@@ -5476,34 +5701,16 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
     if (sesionId == null) return;
 
     final prefs = await SharedPreferences.getInstance();
-    final sesionActual = _tornillosColocados.map((t) => {
-      'instanceId': t.instanceId,
-      'glbId':      t.glbId,
-      'nombre':     t.nombre,
-      'cilindroId': t.cilindroId,
-      'largo_mm':   t.largo,
-      'hx': t.hx, 'hy': t.hy, 'hz': t.hz,
-      'hnx': t.hnx, 'hny': t.hny, 'hnz': t.hnz,
-      'hdx': t.hdx, 'hdy': t.hdy, 'hdz': t.hdz,
-      'usarTrayectoria': t.usarTrayectoria,
-    }).toList();
-    final capasVisibles = <Map<String, dynamic>>[];
-    for (final entry in _visibles.entries) {
-      if (entry.value && entry.key < widget.caso.todosGlb.length) {
-        final glb = widget.caso.todosGlb[entry.key];
-        capasVisibles.add({
-          'indice': entry.key, 'nombre': glb.nombre,
-          'archivo': glb.archivo, 'tipo': glb.tipo, 'url': glb.url,
-        });
-      }
-    }
+    final sesionCompleta = await _construirSesionCompleta();
+    final sesionActual = (sesionCompleta['tornillos'] as List? ?? []);
+    final capasVisibles = (sesionCompleta['capas_visibles'] as List? ?? []);
 
     final sesionData = {
       ...widget.sesionGuardada!, // mantiene id, nombre y caso_origen originales
+      ...sesionCompleta,
       'fecha': DateTime.now().toIso8601String(),
       'num_tornillos': sesionActual.length,
       'num_capas': capasVisibles.length,
-      'capas_visibles': capasVisibles,
       'tornillos_sesion_actual': sesionActual,
     };
 
