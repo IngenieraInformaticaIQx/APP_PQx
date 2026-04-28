@@ -541,10 +541,28 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
               }
             });
           } else if (!widget.modoGenerico) {
-            // Caso normal: restaurar estado guardado de la última visita
+            // Caso normal: preguntar si retomar trabajo pendiente (solo si hay contenido real)
             _credencialesFuture.then((_) async {
               if (!mounted) return;
-              await _restaurarEstadoCaso();
+              final prefs = await SharedPreferences.getInstance();
+              final raw = prefs.getString('estado_caso_${widget.caso.id}');
+              if (raw == null) return;
+              try {
+                final sesion = json.decode(raw) as Map<String, dynamic>;
+                final tieneTornillos = (sesion['tornillos'] as List? ?? []).isNotEmpty;
+                final tieneNotas = (sesion['notas'] as List? ?? []).isNotEmpty;
+                final tieneMediciones = (sesion['mediciones'] as List? ?? []).isNotEmpty;
+                final tieneCapas = (sesion['capas_visibles'] as List? ?? []).isNotEmpty;
+                if (!tieneTornillos && !tieneNotas && !tieneMediciones && !tieneCapas) return;
+                if (!mounted) return;
+                final retomar = await _mostrarPopupRetomar();
+                if (!mounted) return;
+                if (retomar == true) {
+                  await _restaurarSesionCompleta(sesion);
+                } else {
+                  await prefs.remove('estado_caso_${widget.caso.id}');
+                }
+              } catch (_) {}
             });
           }
         })..addJavaScriptChannel('PlateTapped', onMessageReceived: (msg) {
@@ -1522,6 +1540,78 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
         rotTotal: (desp['rotTotal'] as num? ?? 0).toDouble(),
       ));
     }
+  }
+
+  /// Popup "Hay un trabajo pendiente, ¿retomar?" — devuelve true=sí, false=no.
+  Future<bool?> _mostrarPopupRetomar() async {
+    return showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      barrierColor: Colors.black.withOpacity(0.45),
+      builder: (_) => AlertDialog(
+        backgroundColor: Colors.transparent,
+        contentPadding: EdgeInsets.zero,
+        content: ClipRRect(
+          borderRadius: BorderRadius.circular(24),
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
+            child: Container(
+              padding: const EdgeInsets.fromLTRB(24, 24, 24, 16),
+              decoration: BoxDecoration(
+                color: AppTheme.sheetBg,
+                borderRadius: BorderRadius.circular(24),
+                border: Border.all(color: AppTheme.cardBorder, width: 1.5),
+              ),
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                Icon(Icons.history_outlined, size: 36,
+                    color: const Color(0xFF2A7FF5)),
+                const SizedBox(height: 12),
+                Text('Trabajo pendiente',
+                    style: TextStyle(color: AppTheme.darkText,
+                        fontSize: 18, fontWeight: FontWeight.w800)),
+                const SizedBox(height: 8),
+                Text('Hay una sesión guardada para este caso.\n¿Quieres retomar donde lo dejaste?',
+                    style: TextStyle(color: AppTheme.subtitleColor, fontSize: 13),
+                    textAlign: TextAlign.center),
+                const SizedBox(height: 20),
+                Row(children: [
+                  Expanded(
+                    child: TextButton(
+                      onPressed: () => Navigator.pop(context, false),
+                      style: TextButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                            side: BorderSide(color: AppTheme.cardBorder)),
+                      ),
+                      child: Text('Empezar de cero',
+                          style: TextStyle(color: AppTheme.subtitleColor,
+                              fontWeight: FontWeight.w600, fontSize: 13)),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: () => Navigator.pop(context, true),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF2A7FF5),
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14)),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        elevation: 0,
+                      ),
+                      child: const Text('Retomar',
+                          style: TextStyle(fontWeight: FontWeight.w700)),
+                    ),
+                  ),
+                ]),
+              ]),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   /// Restaura el estado de la última visita al caso (Mis Casos).
@@ -2765,7 +2855,7 @@ function toggleTrayectoriasGlb(id, v){
 function setOpacidad(id,op){
   if(!modelos[id]) return;
   modelos[id].traverse(c=>{
-    if(c.isMesh){ c.material.transparent=op<1; c.material.opacity=op; c.material.needsUpdate=true; }
+    if(c.isMesh && !c.userData.esTrayectoria){ c.material.transparent=op<1; c.material.opacity=op; c.material.needsUpdate=true; }
   });
   needsRender = true;
 }
@@ -4799,98 +4889,103 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
                 ),
               ),
             ),
-            // Botón Exportar (visible siempre excepto modoGenérico sin plan ni sesión)
-            if (!widget.modoGenerico || widget.planLocal != null || widget.sesionGuardada != null)
-            Positioned(
-              bottom: 64, right: 14,
-              child: RepaintBoundary(
-                child: GestureDetector(
-                  onTap: _exportarJSON,
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(20),
-                    child: BackdropFilter(
-                      filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
-                      child: Container(
-                        height: 36,
-                        padding: const EdgeInsets.symmetric(horizontal: 14),
-                        decoration: BoxDecoration(
-                          color: AppTheme.cardBg1,
-                          borderRadius: BorderRadius.circular(20),
-                          border: Border.all(color: AppTheme.cardBorder, width: 1.5),
-                          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 8, offset: const Offset(0, 3))],
-                        ),
-                        child: Row(mainAxisSize: MainAxisSize.min, children: [
-                          Icon(Icons.upload_outlined, size: 14, color: AppTheme.darkText.withOpacity(0.7)),
-                          const SizedBox(width: 6),
-                          Text('Exportar', style: TextStyle(
-                              color: AppTheme.darkText.withOpacity(0.7),
-                              fontSize: 12, fontWeight: FontWeight.w700)),
-                        ]),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-            // Botón Guardar / Actualizar
+            // Botones Exportar + Guardar / Actualizar (en fila)
             Positioned(
               bottom: 18, right: 14,
-              child: RepaintBoundary(
-                child: GestureDetector(
-                  onTap: widget.autoCargar && widget.planLocal != null
-                      ? (_planGuardado ? null : _guardarEnMisPlanificaciones)
-                      : widget.autoCargar && widget.planLocal == null
-                          ? _guardarEnCaso
-                          : widget.sesionGuardada != null
-                              ? _actualizarSesion
-                              : _guardarSesion,
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(20),
-                    child: BackdropFilter(
-                      filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
-                      child: Container(
-                        height: 36,
-                        padding: const EdgeInsets.symmetric(horizontal: 14),
-                        decoration: BoxDecoration(
-                          color: (widget.autoCargar
-                              ? const Color(0xFF8E44AD)
-                              : const Color(0xFF34A853)).withOpacity(0.15),
-                          borderRadius: BorderRadius.circular(20),
-                          border: Border.all(
-                            color: (widget.autoCargar
-                                ? const Color(0xFF8E44AD)
-                                : const Color(0xFF34A853)).withOpacity(0.45),
-                            width: 1.5,
-                          ),
-                          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 8, offset: const Offset(0, 3))],
-                        ),
-                        child: Row(mainAxisSize: MainAxisSize.min, children: [
-                          Icon(
-                            (widget.autoCargar && widget.planLocal != null)
-                                ? (_planGuardado ? Icons.check_circle_outline : Icons.save_outlined)
-                                : Icons.save_outlined,
-                            size: 14,
-                            color: (widget.autoCargar && widget.planLocal != null)
-                                ? const Color(0xFF8E44AD)
-                                : const Color(0xFF34A853),
-                          ),
-                          const SizedBox(width: 6),
-                          Text(
-                            (widget.autoCargar && widget.planLocal != null)
-                                ? (_planGuardado ? 'Guardado' : 'Guardar')
-                                : (widget.sesionGuardada != null ? 'Actualizar' : 'Guardar'),
-                            style: TextStyle(
-                              color: (widget.autoCargar && widget.planLocal != null)
-                                  ? const Color(0xFF8E44AD)
-                                  : const Color(0xFF34A853),
-                              fontSize: 12, fontWeight: FontWeight.w700,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (!widget.modoGenerico || widget.planLocal != null || widget.sesionGuardada != null)
+                  RepaintBoundary(
+                    child: GestureDetector(
+                      onTap: _exportarJSON,
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(20),
+                        child: BackdropFilter(
+                          filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+                          child: Container(
+                            height: 36,
+                            padding: const EdgeInsets.symmetric(horizontal: 14),
+                            decoration: BoxDecoration(
+                              color: AppTheme.cardBg1,
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(color: AppTheme.cardBorder, width: 1.5),
+                              boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 8, offset: const Offset(0, 3))],
                             ),
+                            child: Row(mainAxisSize: MainAxisSize.min, children: [
+                              Icon(Icons.upload_outlined, size: 14, color: AppTheme.darkText.withOpacity(0.7)),
+                              const SizedBox(width: 6),
+                              Text('Exportar', style: TextStyle(
+                                  color: AppTheme.darkText.withOpacity(0.7),
+                                  fontSize: 12, fontWeight: FontWeight.w700)),
+                            ]),
                           ),
-                        ]),
+                        ),
                       ),
                     ),
                   ),
-                ),
+                  if (!widget.modoGenerico || widget.planLocal != null || widget.sesionGuardada != null)
+                  const SizedBox(width: 8),
+                  RepaintBoundary(
+                    child: GestureDetector(
+                      onTap: widget.autoCargar && widget.planLocal != null
+                          ? (_planGuardado ? null : _guardarEnMisPlanificaciones)
+                          : widget.autoCargar && widget.planLocal == null
+                              ? _guardarEnCaso
+                              : widget.sesionGuardada != null
+                                  ? _actualizarSesion
+                                  : !widget.modoGenerico
+                                      ? _guardarEnCaso
+                                      : _guardarSesion,
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(20),
+                        child: BackdropFilter(
+                          filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+                          child: Container(
+                            height: 36,
+                            padding: const EdgeInsets.symmetric(horizontal: 14),
+                            decoration: BoxDecoration(
+                              color: (widget.autoCargar
+                                  ? const Color(0xFF8E44AD)
+                                  : const Color(0xFF34A853)).withOpacity(0.15),
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(
+                                color: (widget.autoCargar
+                                    ? const Color(0xFF8E44AD)
+                                    : const Color(0xFF34A853)).withOpacity(0.45),
+                                width: 1.5,
+                              ),
+                              boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 8, offset: const Offset(0, 3))],
+                            ),
+                            child: Row(mainAxisSize: MainAxisSize.min, children: [
+                              Icon(
+                                (widget.autoCargar && widget.planLocal != null)
+                                    ? (_planGuardado ? Icons.check_circle_outline : Icons.save_outlined)
+                                    : Icons.save_outlined,
+                                size: 14,
+                                color: (widget.autoCargar && widget.planLocal != null)
+                                    ? const Color(0xFF8E44AD)
+                                    : const Color(0xFF34A853),
+                              ),
+                              const SizedBox(width: 6),
+                              Text(
+                                (widget.autoCargar && widget.planLocal != null)
+                                    ? (_planGuardado ? 'Guardado' : 'Guardar')
+                                    : (widget.sesionGuardada != null ? 'Actualizar' : 'Guardar'),
+                                style: TextStyle(
+                                  color: (widget.autoCargar && widget.planLocal != null)
+                                      ? const Color(0xFF8E44AD)
+                                      : const Color(0xFF34A853),
+                                  fontSize: 12, fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ]),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
             // Panel plano de corte
@@ -6257,12 +6352,23 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
     final padding = MediaQuery.of(context).padding;
     if (_panelLeftOffset < 0) _panelLeftOffset = size.width - 260 - 12;
 
+    final bool medidasActivas = (_placaArrastrandoActiva || _placaDesplazamiento.tieneDesplazamiento) && !_medidasMinimizado;
+    // medidas panel: top 72 + ~46px contenido + 18px margen
+    const double _medidasBottom = 72.0 + 46.0 + 18.0;
+    final double minPanelTop = medidasActivas ? _medidasBottom : padding.top + 8.0;
+    final double effectivePanelTop = _panelTopOffset < minPanelTop ? minPanelTop : _panelTopOffset;
+    // viewPadding.bottom es el inset físico real (no consumido por Scaffold), más fiable que padding.bottom
+    final double sysBottom = MediaQuery.of(context).viewPadding.bottom;
+    // Altura máxima: handle (20) + margen app (72: botones inferiores) + inset sistema
+    final double maxPanelHeight = size.height - sysBottom - effectivePanelTop - 20 - 72;
+    final double displayPanelHeight = _panelHeight.clamp(160.0, maxPanelHeight);
+
     return AnimatedPositioned(
       duration: _panelArrastrando
           ? Duration.zero          // sin animación mientras arrastramos
           : const Duration(milliseconds: 300),
       curve: Curves.easeInOut,
-      top: _panelTopOffset,
+      top: effectivePanelTop,
       left: _panelAbierto ? _panelLeftOffset : size.width + 20,
       child: GestureDetector(
         onLongPressStart: (d) {
@@ -6278,7 +6384,7 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
           setState(() {
             _panelDragLastPos = d.globalPosition;
             _panelTopOffset = (_panelTopOffset + delta.dy).clamp(
-              padding.top + 8.0,
+              minPanelTop,
               size.height - 160.0,
             );
             _panelLeftOffset = (_panelLeftOffset + delta.dx).clamp(
@@ -6296,7 +6402,7 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
         onDoubleTap: () {
           HapticFeedback.lightImpact();
           setState(() {
-            _panelTopOffset  = 74.0;
+            _panelTopOffset  = minPanelTop;
             _panelLeftOffset = size.width - 260 - 12;
             _panelHeight     = 680.0;
           });
@@ -6319,7 +6425,7 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
                 filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
                 child: Container(
                   width: 260,
-                  height: _panelHeight,
+                  height: displayPanelHeight,
                   decoration: BoxDecoration(
                     color: AppTheme.cardBg1,
                     borderRadius: BorderRadius.circular(20),
@@ -6363,7 +6469,7 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
             GestureDetector(
               onVerticalDragUpdate: (d) {
                 setState(() {
-                  _panelHeight = (_panelHeight + d.delta.dy).clamp(160.0, size.height - _panelTopOffset - 80.0);
+                  _panelHeight = (_panelHeight + d.delta.dy).clamp(160.0, size.height - sysBottom - effectivePanelTop - 92.0);
                 });
               },
               child: Container(
