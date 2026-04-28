@@ -4913,6 +4913,8 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
                               boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 8, offset: const Offset(0, 3))],
                             ),
                             child: Row(mainAxisSize: MainAxisSize.min, children: [
+                              Icon(Icons.send_rounded, size: 13, color: AppTheme.darkText.withOpacity(0.7)),
+                              const SizedBox(width: 5),
                               Text('PQx', style: TextStyle(
                                   color: AppTheme.darkText.withOpacity(0.7),
                                   fontSize: 12, fontWeight: FontWeight.w700)),
