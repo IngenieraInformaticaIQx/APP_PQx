@@ -369,6 +369,7 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
   double _medidasPanelTopOffset = -1.0;
   double _medidasPanelLeftOffset = -1.0;
   bool _medidasPanelArrastrando = false;
+  bool _medidasMinimizado = false;
   Offset _medidasPanelDragLastPos = Offset.zero;
 
   // Regla libre / mediciones
@@ -654,10 +655,13 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
         })..addJavaScriptChannel('EstadoVisor', onMessageReceived: (msg) {
           try {
             final data = jsonDecode(msg.message) as Map<String, dynamic>;
-            _visorStateCache = data; // siempre actualizar caché
+            _visorStateCache = data;
             _estadoVisorCompleter?.complete(data);
             _estadoVisorCompleter = null;
           } catch (_) {}
+        })..addJavaScriptChannel('PanelToggle', onMessageReceived: (_) {
+          if (!mounted) return;
+          setState(() => _panelAbierto = !_panelAbierto);
         })
 
         ..loadHtmlString(_patchHtmlTheme(_buildHtml()));
@@ -1491,23 +1495,51 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
   .spinner{width:34px;height:34px;border:2.5px solid rgba(42,127,245,0.2);
     border-top-color:rgba(42,127,245,0.85);border-radius:50%;animation:spin .75s linear infinite;}
   @keyframes spin{to{transform:rotate(360deg);}}
-  #hint-overlay{
-    position:fixed;bottom:72px;left:50%;transform:translateX(-50%);
-    display:flex;gap:18px;align-items:center;
-    background:rgba(20,20,30,0.62);backdrop-filter:blur(8px);
-    border-radius:20px;padding:9px 20px;
-    pointer-events:none;z-index:50;
-    opacity:0;transition:opacity 0.2s ease;
-    white-space:nowrap;
-  }
-  #hint-overlay.visible{ opacity:1; }
+  #hint-overlay{ display:none!important; }
   .hint-item{
     display:flex;align-items:center;gap:6px;
     font-family:-apple-system,sans-serif;font-size:12px;font-weight:500;
     color:rgba(255,255,255,0.88);
   }
   .hint-item .hi{font-size:16px;line-height:1;}
-  .hint-sep{ width:1px;height:22px;background:rgba(255,255,255,0.18); }
+  .hint-sep{ width:1px;height:20px;background:rgba(255,255,255,0.18); }
+  #touch-plate-modebar{
+    position:fixed;left:14px;bottom:60px;
+    display:none;flex-direction:row;gap:5px;align-items:center;
+    z-index:70;user-select:none;-webkit-user-select:none;touch-action:none;
+    padding:0;border:none;background:transparent;box-shadow:none;
+    font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+  }
+  #touch-plate-modebar.visible{display:flex;}
+  #touch-plate-modebar button{
+    width:38px;height:38px;border-radius:19px;
+    border:1.2px solid rgba(180,190,210,0.38);
+    background:rgba(240,240,248,0.88);
+    color:rgba(50,60,80,0.60);
+    font-size:0;padding:0;cursor:pointer;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    box-shadow:0 2px 8px rgba(0,0,0,0.12);
+    transition:background 0.12s,border-color 0.12s,color 0.12s;
+    backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+  }
+  body.dark #touch-plate-modebar button{
+    background:rgba(18,18,32,0.88);
+    border-color:rgba(80,100,140,0.32);
+    color:rgba(200,210,230,0.55);
+  }
+  #touch-plate-modebar button.active{
+    background:rgba(42,127,245,0.16);
+    border-color:rgba(42,127,245,0.52);
+    color:rgba(42,127,245,1);
+  }
+  body.dark #touch-plate-modebar button.active{color:rgba(90,160,255,1);}
+  #touch-plate-modebar .mode-ico{
+    display:block;font-size:15px;line-height:1;pointer-events:none;
+  }
+  #touch-plate-modebar .mode-lbl{
+    display:block;font-size:7px;font-weight:700;line-height:1;
+    margin-top:1px;pointer-events:none;color:inherit;
+  }
 </style>
 </head>
 <body>
@@ -1517,6 +1549,16 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
   <div class="hint-item"><span class="hi">✌️</span><span>rotar</span></div>
   <div class="hint-sep"></div>
   <div class="hint-item"><span class="hi">🤏</span><span>profundidad</span></div>
+</div>
+<div id="touch-plate-modebar" aria-label="Modo de placa">
+  <button type="button" data-plate-mode="move" class="active"><span class="mode-ico">✥</span><span class="mode-lbl">Mover</span></button>
+  <button type="button" data-plate-mode="depth"><span class="mode-ico">⬡</span><span class="mode-lbl">Fondo</span></button>
+  <button type="button" data-plate-mode="rotate"><span class="mode-ico">↺</span><span class="mode-lbl">Girar</span></button>
+  <button type="button" data-plate-mode="tilt"><span class="mode-ico">⤡</span><span class="mode-lbl">Inclinar</span></button>
+  <button type="button" data-plate-mode="lean"><span class="mode-ico">⟲</span><span class="mode-lbl">Ladear</span></button>
+  <button type="button" data-plate-mode="pend"><span class="mode-ico">↔</span><span class="mode-lbl">Lat.</span></button>
+  <button type="button" data-plate-mode="pend-sup"><span class="mode-ico">⬆</span><span class="mode-lbl">Sup.</span></button>
+  <button type="button" data-plate-mode="pend-inf"><span class="mode-ico">⬇</span><span class="mode-lbl">Inf.</span></button>
 </div>
 <div id="loading"><div class="spinner"></div><span>Cargando modelo…</span></div>
 <div id="watermark"><div class="wm-nombre" id="wm-nombre"></div><div class="wm-paciente" id="wm-paciente"></div></div>
@@ -1538,6 +1580,9 @@ import { RenderPass }      from 'three/addons/postprocessing/RenderPass.js';
 import { OutlinePass }     from 'three/addons/postprocessing/OutlinePass.js';
 import { OutputPass }      from 'three/addons/postprocessing/OutputPass.js';
 
+const _isMob = /iPhone|iPad|Android/i.test(navigator.userAgent) ||
+               (/MacIntel|MacARM/.test(navigator.platform) && navigator.maxTouchPoints > 1);
+
 // ── Escena ─────────────────────────────────────────────────────────────────
 const scene = new THREE.Scene();
 const c2d = document.createElement('canvas'); c2d.width=2; c2d.height=512;
@@ -1551,7 +1596,7 @@ const camera = new THREE.PerspectiveCamera(45, innerWidth/innerHeight, 0.1, 2000
 camera.position.set(0,0,500);
 
 const renderer = new THREE.WebGLRenderer({antialias:true, logarithmicDepthBuffer:true, preserveDrawingBuffer:true});
-renderer.setPixelRatio(/iPhone|iPad|Android/i.test(navigator.userAgent)
+renderer.setPixelRatio(_isMob
   ? Math.min(devicePixelRatio, 1.5)  // móvil: limitar DPR para reducir carga GPU
   : Math.min(devicePixelRatio, 2));
 renderer.setSize(innerWidth, innerHeight);
@@ -1583,7 +1628,6 @@ controls.addEventListener('start', () => { controls.saveState(); });
 const composer = new EffectComposer(renderer);
 composer.addPass(new RenderPass(scene, camera));
 const outlinePass = new OutlinePass(new THREE.Vector2(innerWidth, innerHeight), scene, camera);
-const _isMob = /iPhone|iPad|Android/i.test(navigator.userAgent);
 outlinePass.edgeStrength  = _isMob ? 3.0 : 5.0;
 outlinePass.edgeGlow      = _isMob ? 0.5 : 1.5; // blur passes = principal coste GPU
 outlinePass.edgeThickness = _isMob ? 1.0 : 2.0;
@@ -2891,6 +2935,7 @@ window.visor={
     const c=document.createElement('canvas'); c.width=2; c.height=512;
     const cx=c.getContext('2d');
     const g=cx.createLinearGradient(0,0,0,512);
+    document.body.classList.toggle('dark', !!dark);
     if(dark){
       g.addColorStop(0,'#0D0D1A'); g.addColorStop(0.5,'#16213E'); g.addColorStop(1,'#0D0D1A');
       document.body.style.background='#0D0D1A';
@@ -3006,6 +3051,96 @@ let _modoGiroY = false;          // toca zona lateral → péndulo lateral
 let _giroYEsLeft = false;        // true = toca lado izquierdo
 let _giroYPivot = null;          // pivote para péndulo lateral
 let _placaCenter = null;         // centro geométrico de la placa (para rotar sobre sí misma)
+let _placaLocalBox = null;       // bbox local de la placa activa
+let _touchPlateMode = 'move';     // móvil: un modo claro, un dedo = una acción
+let _emptyTapTime = 0, _emptyTapX = 0, _emptyTapY = 0;
+let _justActivatedDrag = false;  // ignora el primer lift tras long-press
+
+function _touchModeText(mode){
+  switch(mode){
+    case 'depth': return 'Arrastra para profundidad';
+    case 'rotate': return 'Arrastra para girar';
+    case 'pend': return 'Péndulo lateral';
+    case 'pend-sup': return 'Péndulo: pivote superior';
+    case 'tilt': return 'Inclinar: arrastra arriba/abajo';
+    case 'lean': return 'Ladear: arrastra izquierda/derecha';
+    case 'pend-inf': return 'Péndulo: pivote inferior';
+    default: return 'Arrastra para mover';
+  }
+}
+
+function _setTouchPlateMode(mode){
+  _touchPlateMode = mode || 'move';
+  if(_placaArrastrandoId && modelos[_placaArrastrandoId]) _actualizarPivotPenduloMovil(modelos[_placaArrastrandoId]);
+  if(_placaArrastrandoId) _setPlacaGlow(_placaArrastrandoId, true, false);
+  const bar = document.getElementById('touch-plate-modebar');
+  if(bar){
+    bar.querySelectorAll('button').forEach(btn=>{
+      btn.classList.toggle('active', btn.dataset.plateMode === _touchPlateMode);
+    });
+  }
+}
+
+function _handleMobileSelectedTap(x, y){
+  if(!_isMob || !_placaArrastrandoId) return false;
+  if(_justActivatedDrag){
+    _justActivatedDrag = false;
+    return false; // es el lift del long-press, no salir todavía
+  }
+  // Seed double-tap tracking: second tap within 350 ms on same plate triggers reset
+  _dblTapModelId = _placaArrastrandoId;
+  _dblTapTime = Date.now();
+  _finishPlacaDrag();
+  return true;
+}
+
+function _actualizarPivotPenduloMovil(modelo){
+  if(!modelo || !_placaLocalBox) return;
+  _giroYEsLeft = true;
+  const x = _placaLocalBox.min.x;
+  _giroYPivot = modelo.localToWorld(new THREE.Vector3(
+    x,
+    (_placaLocalBox.min.y + _placaLocalBox.max.y) / 2,
+    (_placaLocalBox.min.z + _placaLocalBox.max.z) / 2
+  ));
+}
+
+function _actualizarPivotPenduloVerticalMovil(modelo){
+  if(!modelo || !_placaLocalBox) return;
+  _giroZEsTop = false;
+  _giroZPivot = modelo.localToWorld(new THREE.Vector3(
+    (_placaLocalBox.min.x + _placaLocalBox.max.x) / 2,
+    _placaLocalBox.min.y,
+    (_placaLocalBox.min.z + _placaLocalBox.max.z) / 2
+  ));
+}
+
+function _actualizarPivotPenduloVerticalMovilSup(modelo){
+  if(!modelo || !_placaLocalBox) return;
+  _giroZEsTop = true;
+  _giroZPivot = modelo.localToWorld(new THREE.Vector3(
+    (_placaLocalBox.min.x + _placaLocalBox.max.x) / 2,
+    _placaLocalBox.max.y,
+    (_placaLocalBox.min.z + _placaLocalBox.max.z) / 2
+  ));
+}
+
+function _showTouchPlateModeBar(show){
+  const bar = document.getElementById('touch-plate-modebar');
+  if(!bar) return;
+  bar.classList.toggle('visible', !!show && _isMob);
+  if(show && _isMob) _setTouchPlateMode(_touchPlateMode);
+}
+
+const _touchModeBarEl = document.getElementById('touch-plate-modebar');
+if(_touchModeBarEl){
+  _touchModeBarEl.addEventListener('pointerdown', e=>{
+    e.preventDefault();
+    e.stopPropagation();
+    const btn = e.target.closest('button[data-plate-mode]');
+    if(btn) _setTouchPlateMode(btn.dataset.plateMode);
+  }, {passive:false});
+}
 
 // Activa el arrastre de placa desde coordenadas de pantalla (screenX, screenY).
 // Usado tanto por el long-press timer como por el tap de 2 dedos.
@@ -3056,6 +3191,7 @@ function _tryActivateDrag(screenX, screenY){
     (_lBox.min.y + _lBox.max.y) / 2,
     (_lBox.min.z + _lBox.max.z) / 2
   ));
+  _placaLocalBox = _lBox.clone();
   _modoGiroZ  = _esBottom || _esTop;
   _giroZEsTop = _esTop;
   const _rr = renderer.domElement.getBoundingClientRect();
@@ -3094,6 +3230,17 @@ function _tryActivateDrag(screenX, screenY){
   } else {
     _setPlacaGlow(modelId, true, false);
     _mostrarHint(false);
+  }
+  if(_isMob){
+    _modoGiroZ = false; _giroZEsTop = false; _giroZPivot = null;
+    _modoGiroY = false;
+    _eliminarIndicadorFondo();
+    const initialMode = _esTop ? 'pend-sup' : _esBottom ? 'pend-inf' : 'move';
+    _actualizarPivotPenduloMovil(modelos[modelId]);
+    _setPlacaGlow(modelId, true, false);
+    _setTouchPlateMode(initialMode);
+    _showTouchPlateModeBar(true);
+    _justActivatedDrag = true; // ignorar el primer lift tras long-press
   }
   _postPlacaArrastrando(modelId, true);
 }
@@ -3228,10 +3375,10 @@ renderer.domElement.addEventListener('pointerdown', e=>{
     pointerDownX=e.clientX; pointerDownY=e.clientY;
     return;
   }
-  // Si ya arrastramos placa: segundo dedo o click derecho → rotación, no reiniciar timer
-  if(_placaArrastrandoId) return;
+  // Si ya arrastramos placa: actualizar referencia de tap pero no reiniciar timer
   pointerDownX=e.clientX; pointerDownY=e.clientY;
-  // Tap de 2 dedos sobre placa → activar arrastre tras 250 ms si no es pinch
+  if(_placaArrastrandoId) return;
+  // Tap de 2 dedos sobre placa → activar arrastre inmediatamente (sin long press)
   if(_ptrMap.size === 2 && !_modoNotaActivo){
     if(_arrastrandoTimer){ clearTimeout(_arrastrandoTimer); _arrastrandoTimer=null; }
     if(_twoFingerTimer){ clearTimeout(_twoFingerTimer); _twoFingerTimer=null; }
@@ -3290,6 +3437,16 @@ renderer.domElement.addEventListener('pointermove', e=>{
 
   const modelo = modelos[_placaArrastrandoId];
   if(!modelo) return;
+
+  if(_isMob && e.pointerType === 'touch'){
+    if(_ptrMap.size >= 2){
+      const ptrIds = [..._ptrMap.keys()].sort((a,b)=>a-b);
+      if(e.pointerId !== ptrIds[0]){ needsRender = true; return; }
+    }
+    const prevP = _prevPtr.get(e.pointerId) || {x:e.clientX, y:e.clientY};
+    _handleSingleTouchDrag({x:e.clientX, y:e.clientY}, prevP, modelo);
+    return;
+  }
 
   const modoRotar = _ptrMap.size >= 2 || (e.buttons & 2);
 
@@ -3434,6 +3591,14 @@ renderer.domElement.addEventListener('pointerup', e=>{
     if(_ptrMap.size > 0){ needsRender=true; return; }
     return;
   }
+  if(_isMob && e.pointerType === 'touch' && _placaArrastrandoId){
+    if(_twoFingerTimer){ clearTimeout(_twoFingerTimer); _twoFingerTimer=null; }
+    if(_arrastrandoTimer){ clearTimeout(_arrastrandoTimer); _arrastrandoTimer=null; }
+    const moved = Math.hypot(e.clientX - pointerDownX, e.clientY - pointerDownY);
+    if(moved <= DRAG_THRESHOLD && _handleMobileSelectedTap(e.clientX, e.clientY)) return;
+    needsRender = true;
+    return;
+  }
   if(_twoFingerTimer){ clearTimeout(_twoFingerTimer); _twoFingerTimer=null; }
   if(_arrastrandoTimer){ clearTimeout(_arrastrandoTimer); _arrastrandoTimer=null; }
   if(_placaArrastrandoId){
@@ -3443,7 +3608,8 @@ renderer.domElement.addEventListener('pointerup', e=>{
     _ocultarHint();
     _modoGiroZ = false; _giroZEsTop = false; _giroZPivot = null;
     _modoGiroY = false; _giroYEsLeft = false; _giroYPivot = null;
-    _placaCenter = null;
+    _placaCenter = null; _placaLocalBox = null;
+    _showTouchPlateModeBar(false);
     controls.enabled=true;
     _postPlacaArrastrando(_placaArrastrandoId, false);
     _placaArrastrandoId=null;
@@ -3564,7 +3730,19 @@ renderer.domElement.addEventListener('pointerup', e=>{
       if(h.distance <= maxDist){ hit = h; break; }
     }
   }
-  if(!hit) return;
+  if(!hit){
+    if(e.pointerType === 'touch'){
+      const now2 = Date.now();
+      const close2 = Math.hypot(e.clientX - _emptyTapX, e.clientY - _emptyTapY) < 52;
+      if(close2 && now2 - _emptyTapTime < 420){
+        _emptyTapTime = 0;
+        try{ PanelToggle.postMessage('toggle'); }catch(_er){}
+      } else {
+        _emptyTapTime = now2; _emptyTapX = e.clientX; _emptyTapY = e.clientY;
+      }
+    }
+    return;
+  }
 
   // Normal exterior de la cara en espacio mundo
   // Si face.normal existe la usamos; si no, tomamos la dirección cámara→hit invertida
@@ -3644,7 +3822,7 @@ renderer.domElement.addEventListener('pointerup', e=>{
 
 let needsRender = true;
 // iOS/iPad: limitar a 30fps para evitar sobrecalentamiento (OutlinePass es costoso)
-const _isMobile = /iPhone|iPad|Android/i.test(navigator.userAgent);
+const _isMobile = _isMob;
 const _frameMs  = _isMobile ? 33 : 16; // 30fps móvil, 60fps desktop
 let   _lastFrameT = 0;
 function animate(now){
@@ -3719,13 +3897,167 @@ function _finishPlacaDrag(){
   _ocultarHint();
   _modoGiroZ=false; _giroZEsTop=false; _giroZPivot=null;
   _modoGiroY=false; _giroYEsLeft=false; _giroYPivot=null;
-  _placaCenter=null;
+  _placaCenter=null; _placaLocalBox=null;
+  _touchPlateMode='move'; _justActivatedDrag=false;
+  _showTouchPlateModeBar(false);
   controls.enabled=true;
   _postPlacaArrastrando(_placaArrastrandoId, false);
   _placaArrastrandoId=null;
 }
 
 function _handleSingleTouchDrag(curTouch, prevTouch, modelo){
+  if(_isMob){
+    if(_touchPlateMode === 'move'){
+      if(prevTouch){
+        const dx = curTouch.x - prevTouch.x;
+        const dy = curTouch.y - prevTouch.y;
+        const distCam = camera.position.distanceTo(modelo.position);
+        const tanHFov = Math.tan((camera.fov / 2) * Math.PI / 180);
+        const scr2world = (distCam * tanHFov * 2) / renderer.domElement.clientHeight * 0.18;
+        const camRight = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0);
+        const camUp = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 1);
+        modelo.position.addScaledVector(camRight, dx * scr2world);
+        modelo.position.addScaledVector(camUp, -dy * scr2world);
+        if(_placaCenter){
+          _placaCenter.addScaledVector(camRight, dx * scr2world);
+          _placaCenter.addScaledVector(camUp, -dy * scr2world);
+        }
+        _actualizarHuellaOrigen(_placaArrastrandoId);
+        _postPlacaArrastrando(_placaArrastrandoId, true);
+        needsRender = true;
+      }
+      return;
+    }
+
+    if(_touchPlateMode === 'depth'){
+      if(prevTouch){
+        const dy = curTouch.y - prevTouch.y;
+        _moverPlacaProfundidad(_placaArrastrandoId, -dy * 0.006);
+      }
+      return;
+    }
+
+    if(_touchPlateMode === 'rotate'){
+      if(prevTouch){
+        const dx = curTouch.x - prevTouch.x;
+        const sensibilidad = 0.0010;
+        const localUp = new THREE.Vector3(0,1,0).transformDirection(modelo.matrixWorld).normalize();
+        _rotarAlrededorCentro(modelo, localUp, dx * sensibilidad);
+        _actualizarHuellaOrigen(_placaArrastrandoId);
+        _postPlacaArrastrando(_placaArrastrandoId, true);
+        needsRender = true;
+      }
+      return;
+    }
+
+    if(_touchPlateMode === 'tilt'){
+      // Inclinar hacia dentro/fuera: eje horizontal de cámara (camRight), arrastra ↑↓
+      if(prevTouch){
+        const dy = curTouch.y - prevTouch.y;
+        const sensibilidad = 0.0010;
+        const camFwd = camera.getWorldDirection(new THREE.Vector3());
+        const camRight = new THREE.Vector3().crossVectors(camFwd, new THREE.Vector3(0,1,0)).normalize();
+        _rotarAlrededorCentro(modelo, camRight, dy * sensibilidad);
+        _actualizarHuellaOrigen(_placaArrastrandoId);
+        _postPlacaArrastrando(_placaArrastrandoId, true);
+        needsRender = true;
+      }
+      return;
+    }
+
+    if(_touchPlateMode === 'lean'){
+      // Ladear izq/der: eje de profundidad de cámara (camFwd), arrastra ←→
+      if(prevTouch){
+        const dx = curTouch.x - prevTouch.x;
+        const sensibilidad = 0.0010;
+        const camFwd = camera.getWorldDirection(new THREE.Vector3());
+        _rotarAlrededorCentro(modelo, camFwd, dx * sensibilidad);
+        _actualizarHuellaOrigen(_placaArrastrandoId);
+        _postPlacaArrastrando(_placaArrastrandoId, true);
+        needsRender = true;
+      }
+      return;
+    }
+
+    if(_touchPlateMode === 'pend'){
+      if(prevTouch){
+        _actualizarPivotPenduloMovil(modelo);
+        if(_giroYPivot){
+          const dx = curTouch.x - prevTouch.x;
+          const sensibilidad = 0.0018;
+          const angle = (_giroYEsLeft ? 1 : -1) * dx * sensibilidad;
+          const camUp = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 1).normalize();
+          const quat = new THREE.Quaternion().setFromAxisAngle(camUp, angle);
+          const toModel = modelo.position.clone().sub(_giroYPivot);
+          toModel.applyQuaternion(quat);
+          modelo.position.copy(_giroYPivot.clone().add(toModel));
+          if(_placaCenter){
+            const tc = _placaCenter.clone().sub(_giroYPivot);
+            tc.applyQuaternion(quat);
+            _placaCenter.copy(_giroYPivot.clone().add(tc));
+          }
+          modelo.rotateOnWorldAxis(camUp, angle);
+          _actualizarHuellaOrigen(_placaArrastrandoId);
+          _postPlacaArrastrando(_placaArrastrandoId, true);
+          needsRender = true;
+        }
+      }
+      return;
+    }
+
+    if(_touchPlateMode === 'pend-inf'){
+      if(prevTouch){
+        _actualizarPivotPenduloVerticalMovilSup(modelo);
+        if(_giroZPivot){
+          const dx = curTouch.x - prevTouch.x;
+          const sensibilidad = 0.0014;
+          const angle = -1 * dx * sensibilidad;
+          const camFwd = camera.getWorldDirection(new THREE.Vector3());
+          const quat = new THREE.Quaternion().setFromAxisAngle(camFwd, angle);
+          const toModel = modelo.position.clone().sub(_giroZPivot);
+          toModel.applyQuaternion(quat);
+          modelo.position.copy(_giroZPivot.clone().add(toModel));
+          if(_placaCenter){
+            const tc = _placaCenter.clone().sub(_giroZPivot);
+            tc.applyQuaternion(quat);
+            _placaCenter.copy(_giroZPivot.clone().add(tc));
+          }
+          modelo.rotateOnWorldAxis(camFwd, angle);
+          _actualizarHuellaOrigen(_placaArrastrandoId);
+          _postPlacaArrastrando(_placaArrastrandoId, true);
+          needsRender = true;
+        }
+      }
+      return;
+    }
+
+    if(_touchPlateMode === 'pend-sup'){
+      if(prevTouch){
+        _actualizarPivotPenduloVerticalMovil(modelo);
+        if(_giroZPivot){
+          const dx = curTouch.x - prevTouch.x;
+          const sensibilidad = 0.0014;
+          const angle = 1 * dx * sensibilidad;
+          const camFwd = camera.getWorldDirection(new THREE.Vector3());
+          const quat = new THREE.Quaternion().setFromAxisAngle(camFwd, angle);
+          const toModel = modelo.position.clone().sub(_giroZPivot);
+          toModel.applyQuaternion(quat);
+          modelo.position.copy(_giroZPivot.clone().add(toModel));
+          if(_placaCenter){
+            const tc = _placaCenter.clone().sub(_giroZPivot);
+            tc.applyQuaternion(quat);
+            _placaCenter.copy(_giroZPivot.clone().add(tc));
+          }
+          modelo.rotateOnWorldAxis(camFwd, angle);
+          _actualizarHuellaOrigen(_placaArrastrandoId);
+          _postPlacaArrastrando(_placaArrastrandoId, true);
+          needsRender = true;
+        }
+      }
+      return;
+    }
+  }
+
   if(_modoGiroZ){
     if(prevTouch && _giroZPivot){
       const dx = curTouch.x - prevTouch.x;
@@ -3789,6 +4121,11 @@ function _handleSingleTouchDrag(curTouch, prevTouch, modelo){
 
 function _handleMultiTouchDrag(curTouches, modelo){
   if(curTouches.length < 2) return;
+  if(_isMob){
+    const prev = _findPrevTouch(curTouches[0].id, curTouches[0]);
+    _handleSingleTouchDrag(curTouches[0], prev, modelo);
+    return;
+  }
   const prevTouches = curTouches.map(t => _findPrevTouch(t.id, t));
   const midCurX  = (curTouches[0].x + curTouches[1].x) / 2;
   const midCurY  = (curTouches[0].y + curTouches[1].y) / 2;
@@ -3851,6 +4188,12 @@ renderer.domElement.addEventListener('touchstart', e=>{
       _tryActivateDrag(startMidX, startMidY);
     }, 250);
   }
+  if(e.touches.length === 1 && _placaArrastrandoId){
+    const t = e.touches[0];
+    _touchDragStartX = t.clientX; _touchDragStartY = t.clientY;
+    _prevTouchSnapshot = _snapshotTouches(e.touches);
+    return;
+  }
   if(e.touches.length !== 1 || _modoNotaActivo || _placaArrastrandoId){
     _prevTouchSnapshot = _snapshotTouches(e.touches);
     return;
@@ -3906,7 +4249,12 @@ renderer.domElement.addEventListener('touchend', e=>{
   if(e.touches.length<2) _prevPinchDistTouch=0;
   if(_arrastrandoTimer){ clearTimeout(_arrastrandoTimer); _arrastrandoTimer=null; }
   if(_touchDragTimer){ clearTimeout(_touchDragTimer); _touchDragTimer=null; }
-  if(_placaArrastrandoId && e.touches.length===0){
+  if(_placaArrastrandoId && e.touches.length===0 && _isIOS && e.changedTouches.length > 0){
+    const t = e.changedTouches[0];
+    const moved = Math.hypot(t.clientX - _touchDragStartX, t.clientY - _touchDragStartY);
+    if(moved <= DRAG_THRESHOLD) _handleMobileSelectedTap(t.clientX, t.clientY);
+  }
+  if(_placaArrastrandoId && e.touches.length===0 && !_isMob){
     _finishPlacaDrag();
   }
   _prevTouchSnapshot = _snapshotTouches(e.touches);
@@ -3917,7 +4265,7 @@ renderer.domElement.addEventListener('touchcancel', e=>{
   _touchTwoFingerStart = null;
   _prevPinchDistTouch=0;
   if(_touchDragTimer){ clearTimeout(_touchDragTimer); _touchDragTimer=null; }
-  if(_placaArrastrandoId && e.touches.length===0) _finishPlacaDrag();
+  if(_placaArrastrandoId && e.touches.length===0 && !_isMob) _finishPlacaDrag();
   _prevTouchSnapshot = _snapshotTouches(e.touches);
 }, {passive:false});
 animate();
@@ -3947,7 +4295,8 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
                color:rgba(236,236,244,0.55) !important; }
 </style>
 </head>''';
-    return html.replaceFirst('</head>', darkCss);
+    // Also add dark class to body so CSS selectors like body.dark work
+    return html.replaceFirst('</head>', darkCss).replaceFirst('<body>', '<body class="dark">');
   }
 
   String _buildHtmlWindows() {
@@ -4099,7 +4448,7 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
               ),
             _buildTopBar(),
             // Overlay para cerrar el panel lateral al tocar fuera (excluye topbar)
-            if (_panelAbierto && !Platform.isAndroid && !Platform.isIOS)
+            if (_panelAbierto)
               Positioned(
                 top: 64, left: 0, right: 0, bottom: 0,
                 child: GestureDetector(
@@ -4111,39 +4460,12 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
             _buildBtnGhost(),
             _buildPanelLateral(),
             if (_placaArrastrandoActiva || _placaDesplazamiento.tieneDesplazamiento)
-              _buildPanelMedidasFlotante(),
-            // Hint inferior
-            Positioned(
-              bottom: 16, left: 0, right: 0,
-              child: RepaintBoundary(
-                child: Center(
-                  child: _glassChip(
-                    child: Row(mainAxisSize: MainAxisSize.min, children: [
-                      Icon(_placaArrastrandoActiva ? Icons.open_with : _modoRegla ? Icons.straighten : _modoNota ? Icons.push_pin : Icons.touch_app,
-                          color: _placaArrastrandoActiva ? const Color(0xFF34C759) : _modoRegla ? const Color(0xFF2A7FF5) : _modoNota ? const Color(0xFFF5A623) : AppTheme.subtitleColor, size: 12),
-                      const SizedBox(width: 6),
-                      Text(_placaArrastrandoActiva
-                          ? 'Mover · Der/2dedos: rotar · Rueda/pinch: profundidad'
-                          : _modoRegla
-                          ? (_reglaLibreMm != null
-                              ? 'Distancia: ${_reglaLibreMm!.toStringAsFixed(1)} mm'
-                              : 'Toca 2 puntos para medir')
-                          : _modoNota
-                              ? 'Toca el modelo para clavar una nota'
-                              : 'Mantén pulsada una placa para moverla',
-                          style: TextStyle(
-                              color: _placaArrastrandoActiva ? const Color(0xFF34C759) : _modoRegla ? const Color(0xFF2A7FF5) : _modoNota ? const Color(0xFFF5A623) : AppTheme.subtitleColor,
-                              fontSize: 10.5)),
-                    ]),
-                  ),
-                ),
-              ),
-            ),
+              _medidasMinimizado ? _buildMedidasBtnMinimizado() : _buildPanelMedidasFlotante(),
             // Vistas rápidas
             if (_vistasPanelVisible) _buildVistaPanel(),
             // Botón notas de voz
             Positioned(
-              bottom: 42, left: 102,
+              bottom: 18, left: 102,
               child: RepaintBoundary(
                 child: GestureDetector(
                   onTap: _abrirNotasVoz,
@@ -4169,7 +4491,7 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
             ),
             // Botón PDF documentación
             Positioned(
-              bottom: 42, left: 58,
+              bottom: 18, left: 58,
               child: RepaintBoundary(
                 child: GestureDetector(
                   onTap: _abrirPdfCaso,
@@ -4195,7 +4517,7 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
             ),
             // Botón info esquina inferior izquierda
             Positioned(
-              bottom: 42, left: 14,
+              bottom: 18, left: 14,
               child: RepaintBoundary(
                 child: GestureDetector(
                   onTap: () => _mostrarInfoCaso(context),
@@ -4223,7 +4545,7 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
             // Botón Exportar (visible siempre excepto modoGenérico sin plan ni sesión)
             if (!widget.modoGenerico || widget.planLocal != null || widget.sesionGuardada != null)
             Positioned(
-              bottom: 88, right: 14,
+              bottom: 64, right: 14,
               child: RepaintBoundary(
                 child: GestureDetector(
                   onTap: _exportarJSON,
@@ -4255,7 +4577,7 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
             ),
             // Botón Guardar / Actualizar
             Positioned(
-              bottom: 42, right: 14,
+              bottom: 18, right: 14,
               child: RepaintBoundary(
                 child: GestureDetector(
                   onTap: widget.autoCargar && widget.planLocal != null
@@ -5763,6 +6085,7 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
           setState(() => _panelArrastrando = false);
         },
         onLongPressCancel: () => setState(() => _panelArrastrando = false),
+        onTap: () => setState(() => _panelAbierto = false),
         onDoubleTap: () {
           HapticFeedback.lightImpact();
           setState(() {
@@ -6818,76 +7141,36 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
 
   Widget _buildPlacaDesplazamientoPanel() {
     final azul = const Color(0xFF2A7FF5);
+    final d = _placaDesplazamiento;
     return ClipRRect(
-      borderRadius: BorderRadius.circular(18),
+      borderRadius: BorderRadius.circular(14),
       child: BackdropFilter(
         filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
         child: Container(
-          width: 228,
-          padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+          width: double.infinity,
+          padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
           decoration: BoxDecoration(
             color: AppTheme.cardBg1,
-            borderRadius: BorderRadius.circular(18),
+            borderRadius: BorderRadius.circular(14),
             border: Border.all(color: AppTheme.cardBorder, width: 1.2),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.08),
-                blurRadius: 12,
-                offset: const Offset(0, 4),
-              ),
-            ],
+            boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.08), blurRadius: 10, offset: const Offset(0, 3))],
           ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              Row(children: [
-                Icon(Icons.straighten, size: 13, color: azul),
-                const SizedBox(width: 6),
-                Text(
-                  'VARIACIONES',
-                  style: TextStyle(
-                    color: azul,
-                    fontSize: 9.5,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: 0.8,
-                  ),
-                ),
-              ]),
-              const SizedBox(height: 8),
-              Text(
-                'Posición',
-                style: TextStyle(
-                  color: AppTheme.subtitleColor,
-                  fontSize: 9.5,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              const SizedBox(height: 6),
-              _buildPlacaDesplazamientoRow('X  (lat.)', _placaDesplazamiento.dx, unidad: 'mm'),
-              const SizedBox(height: 5),
-              _buildPlacaDesplazamientoRow('Y  (vert.)', _placaDesplazamiento.dy, unidad: 'mm'),
-              const SizedBox(height: 5),
-              _buildPlacaDesplazamientoRow('Z  (AP)', _placaDesplazamiento.dz, unidad: 'mm'),
-              const SizedBox(height: 5),
-              _buildPlacaDesplazamientoRow('Total', _placaDesplazamiento.dist, unidad: 'mm', signed: false),
-              const SizedBox(height: 10),
-              Text(
-                'Rotación',
-                style: TextStyle(
-                  color: AppTheme.subtitleColor,
-                  fontSize: 9.5,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              const SizedBox(height: 6),
-              _buildPlacaAnguloRow('Rot. X', _placaDesplazamiento.rotX),
-              const SizedBox(height: 5),
-              _buildPlacaAnguloRow('Rot. Y', _placaDesplazamiento.rotY),
-              const SizedBox(height: 5),
-              _buildPlacaAnguloRow('Rot. Z', _placaDesplazamiento.rotZ),
-              const SizedBox(height: 5),
-              _buildPlacaAnguloRow('Total', _placaDesplazamiento.rotTotal, signed: false),
+              Icon(Icons.straighten, size: 10, color: azul),
+              const SizedBox(width: 3),
+              Text('VAR', style: TextStyle(color: azul, fontSize: 8, fontWeight: FontWeight.w800, letterSpacing: 0.5)),
+              const SizedBox(width: 6),
+              Container(width: 0.8, height: 28, color: AppTheme.cardBorder),
+              const SizedBox(width: 6),
+              Expanded(child: _buildVariacionCol('X', d.dx, 'mm', d.rotX, '°')),
+              Container(width: 0.8, height: 28, color: AppTheme.cardBorder),
+              Expanded(child: _buildVariacionCol('Y', d.dy, 'mm', d.rotY, '°')),
+              Container(width: 0.8, height: 28, color: AppTheme.cardBorder),
+              Expanded(child: _buildVariacionCol('Z', d.dz, 'mm', d.rotZ, '°')),
+              Container(width: 0.8, height: 28, color: AppTheme.cardBorder),
+              Expanded(child: _buildVariacionCol('Σ', d.dist, 'mm', d.rotTotal, '°', signed: false)),
             ],
           ),
         ),
@@ -6895,150 +7178,84 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
     );
   }
 
-  Widget _buildPlacaAnguloRow(
-    String nombre,
-    double valor, {
-    bool signed = true,
-  }) {
-    final color = valor.abs() < 0.05
-        ? AppTheme.subtitleColor
-        : const Color(0xFF2A7FF5);
-    final label = signed
-        ? '${valor >= 0 ? '+' : '-'}  ${valor.abs().toStringAsFixed(1)}°'
-        : '${valor.abs().toStringAsFixed(1)}°';
-    return Row(
-      children: [
-        SizedBox(
-          width: 78,
-          child: Text(
-            nombre,
-            style: TextStyle(
-              color: AppTheme.subtitleColor,
-              fontSize: 10,
-              fontWeight: FontWeight.w600,
+  Widget _buildVariacionRow(String label, double pos, String uPos, double rot, String uRot, {bool signed = true}) {
+    final azul = const Color(0xFF2A7FF5);
+    String fmt(double v, String u, bool s) {
+      if (s) return '${v >= 0 ? '+' : '-'}${v.abs().toStringAsFixed(1)}$u';
+      return '${v.abs().toStringAsFixed(1)}$u';
+    }
+    Color colPos = pos.abs() < 0.05 ? AppTheme.subtitleColor : azul;
+    Color colRot = rot.abs() < 0.05 ? AppTheme.subtitleColor : azul;
+    return Row(children: [
+      SizedBox(width: 22, child: Text(label, style: TextStyle(color: AppTheme.subtitleColor, fontSize: 9, fontWeight: FontWeight.w600))),
+      Expanded(child: Text(fmt(pos, uPos, signed), textAlign: TextAlign.center, style: TextStyle(color: colPos, fontSize: 9.5, fontWeight: FontWeight.w700))),
+      Expanded(child: Text(fmt(rot, uRot, signed), textAlign: TextAlign.center, style: TextStyle(color: colRot, fontSize: 9.5, fontWeight: FontWeight.w700))),
+    ]);
+  }
+
+  Widget _buildVariacionCol(String label, double pos, String uPos, double rot, String uRot, {bool signed = true}) {
+    final azul = const Color(0xFF2A7FF5);
+    String fmt(double v, String u, bool s) {
+      if (s) return '${v >= 0 ? '+' : '−'}${v.abs().toStringAsFixed(1)}$u';
+      return '${v.abs().toStringAsFixed(1)}$u';
+    }
+    Color colPos = pos.abs() < 0.05 ? AppTheme.subtitleColor : azul;
+    Color colRot = rot.abs() < 0.05 ? AppTheme.subtitleColor : azul;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.center, children: [
+        Text(label, style: TextStyle(color: AppTheme.subtitleColor, fontSize: 8, fontWeight: FontWeight.w700)),
+        const SizedBox(height: 1),
+        Text(fmt(pos, uPos, signed), textAlign: TextAlign.center, style: TextStyle(color: colPos, fontSize: 9, fontWeight: FontWeight.w700)),
+        Text(fmt(rot, uRot, signed), textAlign: TextAlign.center, style: TextStyle(color: colRot, fontSize: 8.5, fontWeight: FontWeight.w600)),
+      ]),
+    );
+  }
+
+  Widget _buildMedidasBtnMinimizado() {
+    return Positioned(
+      bottom: 18, left: 146,
+      child: GestureDetector(
+        onTap: () { HapticFeedback.lightImpact(); setState(() => _medidasMinimizado = false); },
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(20),
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+            child: Container(
+              width: 36, height: 36,
+              decoration: BoxDecoration(
+                color: const Color(0xFF2A7FF5).withOpacity(0.15),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: const Color(0xFF2A7FF5).withOpacity(0.45), width: 1.5),
+                boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 8, offset: const Offset(0, 3))],
+              ),
+              child: const Center(child: Icon(Icons.straighten, size: 15, color: Color(0xFF2A7FF5))),
             ),
           ),
         ),
-        Expanded(
-          child: Text(
-            label,
-            textAlign: TextAlign.right,
-            style: TextStyle(
-              color: color,
-              fontSize: 10.5,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        ),
-      ],
+      ),
     );
   }
 
   Widget _buildPanelMedidasFlotante() {
-    final size = MediaQuery.of(context).size;
     final padding = MediaQuery.of(context).padding;
-    const panelWidth = 228.0;
-    const estimatedHeight = 270.0;
-
-    if (_medidasPanelLeftOffset < 0) {
-      _medidasPanelLeftOffset = 14;
-    }
-    if (_medidasPanelTopOffset < 0) {
-      _medidasPanelTopOffset = (size.height - estimatedHeight - 92)
-          .clamp(padding.top + 72.0, size.height - estimatedHeight - 16.0);
-    }
 
     return Positioned(
-      top: _medidasPanelTopOffset,
-      left: _medidasPanelLeftOffset,
+      top: padding.top +30.0,
+      left: 110,
+      right: 15,
       child: GestureDetector(
-        onLongPressStart: (d) {
-          HapticFeedback.mediumImpact();
-          setState(() {
-            _medidasPanelArrastrando = true;
-            _medidasPanelDragLastPos = d.globalPosition;
-          });
-        },
-        onLongPressMoveUpdate: (d) {
-          if (!_medidasPanelArrastrando) return;
-          final delta = d.globalPosition - _medidasPanelDragLastPos;
-          setState(() {
-            _medidasPanelDragLastPos = d.globalPosition;
-            _medidasPanelTopOffset = (_medidasPanelTopOffset + delta.dy).clamp(
-              padding.top + 72.0,
-              size.height - estimatedHeight - 16.0,
-            );
-            _medidasPanelLeftOffset = (_medidasPanelLeftOffset + delta.dx).clamp(
-              8.0,
-              size.width - panelWidth - 8.0,
-            );
-          });
-        },
-        onLongPressEnd: (_) {
-          HapticFeedback.lightImpact();
-          setState(() => _medidasPanelArrastrando = false);
-        },
-        onLongPressCancel: () => setState(() => _medidasPanelArrastrando = false),
         onDoubleTap: () {
           HapticFeedback.lightImpact();
-          setState(() {
-            _medidasPanelTopOffset = (size.height - estimatedHeight - 92)
-                .clamp(padding.top + 72.0, size.height - estimatedHeight - 16.0);
-            _medidasPanelLeftOffset = 14;
-          });
+          setState(() => _medidasMinimizado = true);
         },
         behavior: HitTestBehavior.opaque,
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 150),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(18),
-            boxShadow: _medidasPanelArrastrando
-                ? [BoxShadow(color: const Color(0xFF2A7FF5).withOpacity(0.28), blurRadius: 24, offset: const Offset(0, 8))]
-                : [BoxShadow(color: Colors.black.withOpacity(0.08), blurRadius: 12, offset: const Offset(0, 4))],
-          ),
+          decoration: const BoxDecoration(),
           child: _buildPlacaDesplazamientoPanel(),
         ),
       ),
-    );
-  }
-
-  Widget _buildPlacaDesplazamientoRow(
-    String nombre,
-    double valor, {
-    required String unidad,
-    bool signed = true,
-  }) {
-    final color = valor.abs() < 0.05
-        ? AppTheme.subtitleColor
-        : const Color(0xFF2A7FF5);
-    final label = signed
-        ? '${valor >= 0 ? '+' : '-'} ${valor.abs().toStringAsFixed(1)} $unidad'
-        : '${valor.abs().toStringAsFixed(1)} $unidad';
-    return Row(
-      children: [
-        SizedBox(
-          width: 78,
-          child: Text(
-            nombre,
-            style: TextStyle(
-              color: AppTheme.subtitleColor,
-              fontSize: 10,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ),
-        Expanded(
-          child: Text(
-            label,
-            textAlign: TextAlign.right,
-            style: TextStyle(
-              color: color,
-              fontSize: 10.5,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        ),
-      ],
     );
   }
 
