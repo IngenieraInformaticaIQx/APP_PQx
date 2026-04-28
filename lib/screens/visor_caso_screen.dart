@@ -4913,9 +4913,7 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
                               boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 8, offset: const Offset(0, 3))],
                             ),
                             child: Row(mainAxisSize: MainAxisSize.min, children: [
-                              Icon(Icons.upload_outlined, size: 14, color: AppTheme.darkText.withOpacity(0.7)),
-                              const SizedBox(width: 6),
-                              Text('Exportar', style: TextStyle(
+                              Text('PQx', style: TextStyle(
                                   color: AppTheme.darkText.withOpacity(0.7),
                                   fontSize: 12, fontWeight: FontWeight.w700)),
                             ]),
@@ -5804,12 +5802,37 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
     final sesion = await _construirSesionCompleta();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('estado_caso_${widget.caso.id}', json.encode(sesion));
+    unawaited(_setEstadoModificado(prefs));
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
       content: Text('Caso guardado'),
       backgroundColor: Color(0xFF34A853),
       duration: Duration(seconds: 2),
     ));
+  }
+
+  /// Fuerza el estado del caso a 'modificado' (permite bajar desde 'enviado').
+  Future<void> _setEstadoModificado(SharedPreferences prefs) async {
+    if (widget.modoGenerico) return;
+    if (_estadoActual == 'modificado') return;
+    try {
+      final email    = prefs.getString('login_email')    ?? '';
+      final password = prefs.getString('login_password') ?? '';
+      await http.post(
+        Uri.parse(_apiCambioEstado),
+        headers: {
+          'Authorization': 'Basic ${base64Encode(utf8.encode('$email:$password'))}',
+          'Content-Type': 'application/json',
+        },
+        body: json.encode({'id': widget.caso.id, 'estado': 'modificado'}),
+      ).timeout(const Duration(seconds: 10));
+      final fecha = DateTime.now().toIso8601String();
+      await prefs.setString('estado_fecha_${widget.caso.id}', fecha);
+      final ultimoId = prefs.getString('ultimo_caso_id');
+      if (ultimoId == widget.caso.id) await prefs.setString('ultimo_caso_estado', 'modificado');
+      if (mounted) setState(() => _estadoActual = 'modificado');
+      widget.onEstadoCambiado?.call('modificado');
+    } catch (_) {}
   }
 
   /// Sobrescribe la sesión existente (sin diálogo de nombre).
@@ -6360,7 +6383,7 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
     // viewPadding.bottom es el inset físico real (no consumido por Scaffold), más fiable que padding.bottom
     final double sysBottom = MediaQuery.of(context).viewPadding.bottom;
     // Altura máxima: handle (20) + margen app (72: botones inferiores) + inset sistema
-    final double maxPanelHeight = size.height - sysBottom - effectivePanelTop - 20 - 72;
+    final double maxPanelHeight = size.height - sysBottom - effectivePanelTop - 20 - 110;
     final double displayPanelHeight = _panelHeight.clamp(160.0, maxPanelHeight);
 
     return AnimatedPositioned(
@@ -6469,7 +6492,7 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
             GestureDetector(
               onVerticalDragUpdate: (d) {
                 setState(() {
-                  _panelHeight = (_panelHeight + d.delta.dy).clamp(160.0, size.height - sysBottom - effectivePanelTop - 92.0);
+                  _panelHeight = (_panelHeight + d.delta.dy).clamp(160.0, size.height - sysBottom - effectivePanelTop - 130.0);
                 });
               },
               child: Container(
