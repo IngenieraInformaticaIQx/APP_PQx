@@ -194,7 +194,7 @@ class _CasosScreenState extends State<CasosScreen>
       case 'validado':   return 'Validado';
       case 'modificado': return 'Modificado';
       case 'firmado':    return 'Firmado';
-      case 'enviado':    return 'Enviado';
+      case 'enviado':    return 'Enviado a PQx';
       default:           return 'Pendiente';
     }
   }
@@ -670,7 +670,7 @@ class _CasosScreenState extends State<CasosScreen>
                                     Builder(builder: (_) {
                                       final dt = DateTime.tryParse(_fechasEstado[caso.id]!);
                                       if (dt == null) return const SizedBox.shrink();
-                                      final label = caso.estado == 'enviado' ? 'Enviado' : 'Modificado';
+                                      final label = caso.estado == 'enviado' ? 'Enviado a PQx' : 'Modificado';
                                       final fecha = '${dt.day.toString().padLeft(2,'0')}/${dt.month.toString().padLeft(2,'0')}/${dt.year}  ${dt.hour.toString().padLeft(2,'0')}:${dt.minute.toString().padLeft(2,'0')}';
                                       return Row(mainAxisSize: MainAxisSize.min, children: [
                                         Icon(
