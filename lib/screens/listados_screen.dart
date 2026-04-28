@@ -36,7 +36,7 @@ class _ListadosScreenState extends State<ListadosScreen>
   static const Color _accentL  = Color(0xFFFFB74D);
 
   static const String _exportarUrl =
-      'https://webhook.site/3c3d9c3a-d353-4a19-8259-31f06cdc9801';
+      'https://n8n.srv1089937.hstgr.cloud/webhook/adf721aa-c593-42e0-a40e-93d32b0c9d60';
 
   void _onThemeChanged() { if (mounted) setState(() {}); }
 
@@ -272,6 +272,14 @@ class _ListadosScreenState extends State<ListadosScreen>
     final casoOrigen   = sesion['caso_origen'] as String? ?? '';
     final numTornillos = sesion['num_tornillos'] as int? ?? 0;
     final numCapas     = sesion['num_capas'] as int? ?? 0;
+    final estadoSesion = sesion['estado'] as String? ?? 'guardado';
+    final Color badgeColor;
+    final String badgeLabel;
+    switch (estadoSesion) {
+      case 'pendiente': badgeColor = const Color(0xFFE8840A); badgeLabel = 'PENDIENTE'; break;
+      case 'enviado':   badgeColor = const Color(0xFF34A853); badgeLabel = 'ENVIADO A PQx'; break;
+      default:          badgeColor = _accent;                 badgeLabel = 'GUARDADO';
+    }
 
     return GestureDetector(
       onTap: () => Navigator.push(context, MaterialPageRoute(
@@ -344,16 +352,16 @@ class _ListadosScreenState extends State<ListadosScreen>
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                           decoration: BoxDecoration(
-                            color: _accent.withOpacity(0.12),
+                            color: badgeColor.withOpacity(0.12),
                             borderRadius: BorderRadius.circular(20),
-                            border: Border.all(color: _accent.withOpacity(0.28)),
+                            border: Border.all(color: badgeColor.withOpacity(0.28)),
                           ),
                           child: Row(mainAxisSize: MainAxisSize.min, children: [
                             Container(width: 6, height: 6,
-                              decoration: BoxDecoration(color: _accent, shape: BoxShape.circle,
-                                boxShadow: [BoxShadow(color: _accent.withOpacity(0.6), blurRadius: 4)])),
+                              decoration: BoxDecoration(color: badgeColor, shape: BoxShape.circle,
+                                boxShadow: [BoxShadow(color: badgeColor.withOpacity(0.6), blurRadius: 4)])),
                             const SizedBox(width: 5),
-                            Text('GUARDADO', style: TextStyle(color: _accent,
+                            Text(badgeLabel, style: TextStyle(color: badgeColor,
                                 fontSize: 9, fontWeight: FontWeight.w800, letterSpacing: 1.5)),
                           ]),
                         ),
@@ -564,10 +572,23 @@ class _DetalleScreenState extends State<_DetalleScreen>
         ..fields['datos'] = jsonStr;
       final resp = await request.send();
       if (!mounted) return;
+      final ok = resp.statusCode >= 200 && resp.statusCode < 300;
+      if (ok) {
+        // Actualizar estado en listados_sesiones
+        final sesionId = widget.sesion['id'] as String?;
+        if (sesionId != null) {
+          final listaRaw = prefs.getString('listados_sesiones') ?? '[]';
+          final List<dynamic> lista = json.decode(listaRaw);
+          final idx = lista.indexWhere((s) => s['id'] == sesionId);
+          if (idx >= 0) {
+            lista[idx] = {...(lista[idx] as Map<String, dynamic>), 'estado': 'enviado'};
+            await prefs.setString('listados_sesiones', json.encode(lista));
+          }
+        }
+      }
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(resp.statusCode == 200
-            ? 'Exportado correctamente' : 'Error al exportar (${resp.statusCode})'),
-        backgroundColor: resp.statusCode == 200 ? _green : Colors.redAccent,
+        content: Text(ok ? 'Enviado a PQx correctamente' : 'Error al enviar (${resp.statusCode})'),
+        backgroundColor: ok ? _green : Colors.redAccent,
         duration: const Duration(seconds: 3),
       ));
     } catch (e) {
@@ -813,9 +834,9 @@ class _DetalleScreenState extends State<_DetalleScreen>
                         const SizedBox(width: 18, height: 18,
                           child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
                       else
-                        const Icon(Icons.ios_share, color: Colors.white, size: 20),
+                        const Icon(Icons.send_rounded, color: Colors.white, size: 20),
                       const SizedBox(width: 10),
-                      Text(_exportando ? 'Exportando…' : 'Exportar planificación',
+                      Text(_exportando ? 'Enviando…' : 'Enviar a PQx',
                           style: const TextStyle(color: Colors.white,
                               fontSize: 15, fontWeight: FontWeight.w700)),
                     ]),

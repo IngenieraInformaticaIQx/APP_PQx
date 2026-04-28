@@ -137,15 +137,26 @@ class _CasosScreenState extends State<CasosScreen>
             _cardControllers.add(ctrl);
           }
 
-          // Cargar fechas de estado guardadas localmente
+          // Cargar fechas y estados guardados localmente (override sobre el API)
           final Map<String, String> fechas = {};
+          final List<CasoMedico> casosConEstadoLocal = [];
           for (final c in casos) {
             final f = prefs.getString('estado_fecha_${c.id}');
             if (f != null) fechas[c.id] = f;
+            final estadoLocal = prefs.getString('estado_local_${c.id}');
+            if (estadoLocal != null && estadoLocal != c.estado) {
+              casosConEstadoLocal.add(CasoMedico(
+                id: c.id, nombre: c.nombre, paciente: c.paciente,
+                fechaOp: c.fechaOp, estado: estadoLocal,
+                biomodelos: c.biomodelos, placas: c.placas, tornillos: c.tornillos,
+              ));
+            } else {
+              casosConEstadoLocal.add(c);
+            }
           }
 
           setState(() {
-            _casos = casos;
+            _casos = casosConEstadoLocal;
             _fechasEstado.clear();
             _fechasEstado.addAll(fechas);
             _loading = false;

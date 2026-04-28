@@ -37,6 +37,7 @@ class _MisPlanificacionesLocalesScreenState
 
   List<PlanificacionLocal> _planes = [];
   bool _cargando = true;
+  final Map<String, String> _estadosPlan = {};
 
   static const Color _accent   = Color(0xFF2A7FF5);
 
@@ -61,7 +62,16 @@ class _MisPlanificacionesLocalesScreenState
     setState(() => _cargando = true);
     final lista = await PlanificacionRepository.cargarTodas();
     if (!mounted) return;
-    setState(() { _planes = lista; _cargando = false; });
+    final prefs = await SharedPreferences.getInstance();
+    final estados = <String, String>{};
+    for (final p in lista) {
+      final e = prefs.getString('estado_plan_${p.id}');
+      if (e != null) estados[p.id] = e;
+    }
+    setState(() { _planes = lista; _estadosPlan
+      ..clear()
+      ..addAll(estados);
+    _cargando = false; });
   }
 
   @override
@@ -106,7 +116,8 @@ class _MisPlanificacionesLocalesScreenState
           _showCargandoOverlay(false);
           Navigator.push(context,
               MaterialPageRoute(builder: (_) =>
-                  VisorCasoScreen(caso: caso, modoGenerico: true, planLocal: plan)));
+                  VisorCasoScreen(caso: caso, modoGenerico: true, planLocal: plan)))
+              .then((_) => _cargar());
           return;
         }
       }
@@ -380,6 +391,10 @@ class _MisPlanificacionesLocalesScreenState
                   ),
                 ),
 
+                // Badge estado
+                _buildEstadoBadge(_estadosPlan[plan.id]),
+                const SizedBox(width: 8),
+
                 // Flecha
                 Icon(Icons.arrow_forward_ios_rounded,
                     color: acent.withOpacity(0.50), size: 14),
@@ -440,6 +455,37 @@ class _MisPlanificacionesLocalesScreenState
   Widget _buildLoader() {
     return Center(
       child: CircularProgressIndicator(color: _accent, strokeWidth: 2.5),
+    );
+  }
+
+  // ── Badge de estado ────────────────────────────────────────────────────────
+
+  Widget _buildEstadoBadge(String? estado) {
+    final Color color;
+    final String label;
+    switch (estado) {
+      case 'pendiente':
+        color = const Color(0xFFE8840A);
+        label = 'Pendiente';
+        break;
+      case 'enviado':
+        color = const Color(0xFF34A853);
+        label = 'Enviado a PQx';
+        break;
+      default:
+        color = const Color(0xFF9E9E9E);
+        label = 'Guardado';
+    }
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.12),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: color.withOpacity(0.35), width: 1),
+      ),
+      child: Text(label,
+          style: TextStyle(color: color, fontSize: 9.5,
+              fontWeight: FontWeight.w700)),
     );
   }
 

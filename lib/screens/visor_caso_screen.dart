@@ -3255,6 +3255,8 @@ window.visor={
   },
   capturarVista: function(v){
     setVista(v);
+    // 900ms: iOS setInterval fires at ~30fps so the 25-frame camera animation
+    // takes ~825ms; 500ms was firing before the animation finished on iOS.
     setTimeout(function(){
       const prev = outlinePass.selectedObjects.slice();
       outlinePass.selectedObjects = [];
@@ -3262,7 +3264,7 @@ window.visor={
       const dataUrl = renderer.domElement.toDataURL('image/png');
       outlinePass.selectedObjects = prev;
       CapturaVista.postMessage(dataUrl);
-    }, 500);
+    }, 900);
   },
   capturarPantalla: function(){
     const prev = outlinePass.selectedObjects.slice();
@@ -5433,7 +5435,7 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
     _capturaVistaCompleter = Completer<Uint8List>();
     _jsRun('window.visor.capturarVista($v);');
     try {
-      return await _capturaVistaCompleter!.future.timeout(const Duration(seconds: 3));
+      return await _capturaVistaCompleter!.future.timeout(const Duration(seconds: 6));
     } catch (_) {
       _capturaVistaCompleter = null;
       return null;
@@ -5623,6 +5625,7 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
     if (!mounted) return;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('sesion_plan_${planActualizado.id}', json.encode(sesion));
+    await prefs.setString('estado_plan_${planActualizado.id}', 'pendiente');
 
     await PlanificacionRepository.guardar(planActualizado);
     if (!mounted) return;
@@ -5752,6 +5755,7 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
       'num_capas': capasVisibles.length,
       'tornillos_sesion_actual': sesionActual,
       'audio_notas_id': _sessionAudioId,
+      'estado': 'guardado',
       'caso': {
         'id':       widget.caso.id,
         'nombre':   widget.caso.nombre,
@@ -5806,6 +5810,7 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
       ).timeout(const Duration(seconds: 10));
       final fecha = DateTime.now().toIso8601String();
       await prefs.setString('estado_fecha_${widget.caso.id}', fecha);
+      await prefs.setString('estado_local_${widget.caso.id}', 'modificado');
       final ultimoId = prefs.getString('ultimo_caso_id');
       if (ultimoId == widget.caso.id) await prefs.setString('ultimo_caso_estado', 'modificado');
       if (mounted) setState(() => _estadoActual = 'modificado');
@@ -5830,6 +5835,7 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
       'num_tornillos': sesionActual.length,
       'num_capas': capasVisibles.length,
       'tornillos_sesion_actual': sesionActual,
+      'estado': 'pendiente',
     };
 
     final listaRaw = prefs.getString('listados_sesiones') ?? '[]';
@@ -5853,13 +5859,19 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
   Future<void> _exportarJSON() async {
     final prefs = await SharedPreferences.getInstance();
 
-    // Tornillos de la sesión actual (en vivo)
+    // Tornillos con posición 3D completa
     final sesionActual = _tornillosColocados.map((t) => {
-      'instanceId':  t.instanceId,
-      'glbId':       t.glbId,
-      'nombre':      t.nombre,
-      'cilindroId':  t.cilindroId,
-      'largo_mm':    t.largo,
+      'instanceId':       t.instanceId,
+      'glbId':            t.glbId,
+      'nombre':           t.nombre,
+      'cilindroId':       t.cilindroId,
+      'cilindroNombre':   t.cilindroNombre,
+      'largo_mm':         t.largo,
+      'posicion':         {'x': t.hx,  'y': t.hy,  'z': t.hz},
+      'normal':           {'x': t.hnx, 'y': t.hny, 'z': t.hnz},
+      'direccion':        {'x': t.hdx, 'y': t.hdy, 'z': t.hdz},
+      'usarTrayectoria':  t.usarTrayectoria,
+      'visible':          t.visible,
     }).toList();
 
     // Capas visibles actualmente
@@ -5877,8 +5889,44 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
       }
     }
 
+    // Desplazamiento de placa respecto al original
+    final desp = _placaDesplazamiento;
+    final desplazamientoPlaca = desp.tieneDesplazamiento
+        ? {
+            'desplazamiento_mm': {
+              'x': double.parse(desp.dx.toStringAsFixed(2)),
+              'y': double.parse(desp.dy.toStringAsFixed(2)),
+              'z': double.parse(desp.dz.toStringAsFixed(2)),
+              'total': double.parse(desp.dist.toStringAsFixed(2)),
+            },
+            'rotacion_deg': {
+              'x': double.parse(desp.rotX.toStringAsFixed(2)),
+              'y': double.parse(desp.rotY.toStringAsFixed(2)),
+              'z': double.parse(desp.rotZ.toStringAsFixed(2)),
+              'total': double.parse(desp.rotTotal.toStringAsFixed(2)),
+            },
+          }
+        : null;
+
+    // Mediciones 3D activas
+    final mediciones = _mediciones.where((m) => m.visible).map((m) => {
+      'id':   m.id,
+      'mm':   double.parse(m.mm.toStringAsFixed(2)),
+      'punto_a': {'x': m.x1, 'y': m.y1, 'z': m.z1},
+      'punto_b': {'x': m.x2, 'y': m.y2, 'z': m.z2},
+    }).toList();
+
+    // Notas 3D activas
+    final notas3d = _notas.where((n) => n.visible).map((n) => {
+      'id':     n.id,
+      'texto':  n.texto,
+      'posicion': {'x': double.parse(n.x.toStringAsFixed(2)),
+                   'y': double.parse(n.y.toStringAsFixed(2)),
+                   'z': double.parse(n.z.toStringAsFixed(2))},
+    }).toList();
+
     // Payload JSON
-    final payload = {
+    final payload = <String, dynamic>{
       'caso': {
         'id':       widget.caso.id,
         'nombre':   widget.caso.nombre,
@@ -5888,6 +5936,9 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
       },
       'capas_visibles': capasVisibles,
       'tornillos': sesionActual,
+      if (desplazamientoPlaca != null) 'desplazamiento_placa': desplazamientoPlaca,
+      if (mediciones.isNotEmpty)       'mediciones': mediciones,
+      if (notas3d.isNotEmpty)          'notas_3d': notas3d,
       'exportado_en': DateTime.now().toIso8601String(),
     };
     final jsonStr = const JsonEncoder.withIndent('  ').convert(payload);
@@ -5971,7 +6022,7 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
       content: Text('Capturando vistas…'),
       backgroundColor: Colors.black87,
-      duration: Duration(seconds: 5),
+      duration: Duration(seconds: 25),
     ));
 
     // Capturar las 3 vistas secuencialmente
@@ -6065,6 +6116,10 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
 
       final fechaHoy = DateTime.now().toIso8601String();
       await prefs.setString('estado_fecha_${widget.caso.id}', fechaHoy);
+      await prefs.setString('estado_local_${widget.caso.id}', 'enviado');
+      if (widget.planLocal != null) {
+        await prefs.setString('estado_plan_${widget.planLocal!.id}', 'enviado');
+      }
       final ultimoId = prefs.getString('ultimo_caso_id');
       if (ultimoId == widget.caso.id) {
         await prefs.setString('ultimo_caso_estado', 'enviado');
