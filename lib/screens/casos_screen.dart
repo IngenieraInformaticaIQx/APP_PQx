@@ -185,7 +185,7 @@ class _CasosScreenState extends State<CasosScreen>
       case 'validado':   return const Color(0xFF34A853);
       case 'modificado': return const Color(0xFFE8840A);
       case 'firmado':    return const Color(0xFF2A7FF5);
-      case 'enviado':    return const Color(0xFFE65100);
+      case 'enviado':    return const Color(0xFF34A853);
       default:           return const Color(0xFF6969DD);
     }
   }
@@ -195,7 +195,7 @@ class _CasosScreenState extends State<CasosScreen>
       case 'validado':   return const Color(0xFF81C995);
       case 'modificado': return const Color(0xFFFFB74D);
       case 'firmado':    return const Color(0xFF7EC8FF);
-      case 'enviado':    return const Color(0xFFFF8A65);
+      case 'enviado':    return const Color(0xFF81C995);
       default:           return const Color(0xFFBDBDBD);
     }
   }
