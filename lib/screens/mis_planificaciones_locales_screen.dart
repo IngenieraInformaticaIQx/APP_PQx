@@ -68,10 +68,16 @@ class _MisPlanificacionesLocalesScreenState
       final e = prefs.getString('estado_plan_${p.id}');
       if (e != null) estados[p.id] = e;
     }
-    setState(() { _planes = lista; _estadosPlan
-      ..clear()
-      ..addAll(estados);
-    _cargando = false; });
+    setState(() {
+      _planes = lista;
+      // Fusionar: prefs tiene prioridad, pero conservar estados en memoria
+      // si prefs aún no los refleja (evita race condition con _cambiarEstadoAEnviado)
+      final merged = Map<String, String>.from(_estadosPlan);
+      merged.removeWhere((k, _) => !lista.any((p) => p.id == k));
+      merged.addAll(estados);
+      _estadosPlan..clear()..addAll(merged);
+      _cargando = false;
+    });
   }
 
   @override
@@ -116,7 +122,14 @@ class _MisPlanificacionesLocalesScreenState
           _showCargandoOverlay(false);
           Navigator.push(context,
               MaterialPageRoute(builder: (_) =>
-                  VisorCasoScreen(caso: caso, modoGenerico: true, planLocal: plan)))
+                  VisorCasoScreen(
+                    caso: caso,
+                    modoGenerico: true,
+                    planLocal: plan,
+                    onEstadoCambiado: (nuevoEstado) {
+                      if (mounted) setState(() => _estadosPlan[plan.id] = nuevoEstado);
+                    },
+                  )))
               .then((_) => _cargar());
           return;
         }
