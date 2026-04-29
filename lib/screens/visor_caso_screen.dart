@@ -374,6 +374,8 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
   String get _audioNotasId {
     if (widget.planLocal != null) return widget.planLocal!.id;
     if (!widget.modoGenerico) return widget.caso.id;
+    // autoCargar genérico (varval_submenu): ID estable por tipo de visor
+    if (widget.autoCargar) return widget.caso.id;
     return _sessionAudioId;
   }
 
@@ -774,9 +776,11 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
     _colocadosVersion.dispose();
     _notasVersion.dispose();
     _catCacheVersion.dispose();
-    // Borrar notas de sesión genérica solo si el usuario NO guardó la sesión
+    // Borrar notas solo para sesiones genéricas efímeras (sin planLocal, sin sesionGuardada,
+    // sin autoCargar, y que el usuario no guardó explícitamente).
+    // autoCargar usa caso.id como ID estable → sus notas persisten y no se tocan aquí.
     if (widget.planLocal == null && widget.modoGenerico && !_sesionAudioGuardada
-        && widget.sesionGuardada == null) {
+        && widget.sesionGuardada == null && !widget.autoCargar) {
       AudioNotasService.eliminarSesion(_sessionAudioId);
     }
     super.dispose();
@@ -6076,7 +6080,7 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
           backgroundColor: ok ? const Color(0xFF34A853) : Colors.redAccent,
           duration: const Duration(seconds: 3),
         ));
-        if (ok) _cambiarEstadoAEnviado(prefs);
+        if (ok) await _cambiarEstadoAEnviado(prefs);
       }
     } catch (e) {
       if (mounted) {
@@ -6124,36 +6128,57 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
 
   // ── Cambia el estado del caso a 'enviado' tras exportar correctamente ───────
   Future<void> _cambiarEstadoAEnviado(SharedPreferences prefs) async {
+    // Actualizar estado local siempre (independiente de si la API del servidor falla)
+    final fechaHoy = DateTime.now().toIso8601String();
+    await prefs.setString('estado_fecha_${widget.caso.id}', fechaHoy);
+    await prefs.setString('estado_local_${widget.caso.id}', 'enviado');
+    await _marcarSesionGuardadaComoEnviada(prefs);
+    if (widget.planLocal != null) {
+      await prefs.setString('estado_plan_${widget.planLocal!.id}', 'enviado');
+    }
+    final ultimoId = prefs.getString('ultimo_caso_id');
+    if (ultimoId == widget.caso.id) {
+      await prefs.setString('ultimo_caso_estado', 'enviado');
+    }
+    if (mounted) setState(() => _estadoActual = 'enviado');
+    widget.onEstadoCambiado?.call('enviado');
+
+    // Sincronizar estado con servidor solo para casos reales (no visores genéricos)
+    if (!widget.modoGenerico) {
+      try {
+        final email    = prefs.getString('login_email')    ?? '';
+        final password = prefs.getString('login_password') ?? '';
+        await http.post(
+          Uri.parse(_apiCambioEstado),
+          headers: {
+            'Authorization': 'Basic ${base64Encode(utf8.encode('$email:$password'))}',
+            'Content-Type': 'application/json',
+          },
+          body: json.encode({'id': widget.caso.id, 'estado': 'enviado'}),
+        ).timeout(const Duration(seconds: 10));
+      } catch (_) {
+        // Fallo silencioso: el export ya fue correcto
+      }
+    }
+  }
+
+  Future<void> _marcarSesionGuardadaComoEnviada(SharedPreferences prefs) async {
+    final sesionId = widget.sesionGuardada?['id'] as String?;
+    if (sesionId == null) return;
+
     try {
-      final email    = prefs.getString('login_email')    ?? '';
-      final password = prefs.getString('login_password') ?? '';
-      final credentials = base64Encode(utf8.encode('$email:$password'));
+      final listaRaw = prefs.getString('listados_sesiones') ?? '[]';
+      final List<dynamic> lista = json.decode(listaRaw);
+      final idx = lista.indexWhere((s) => s is Map && s['id'] == sesionId);
+      if (idx < 0) return;
 
-      await http.post(
-        Uri.parse(_apiCambioEstado),
-        headers: {
-          'Authorization': 'Basic $credentials',
-          'Content-Type': 'application/json',
-        },
-        body: json.encode({'id': widget.caso.id, 'estado': 'enviado'}),
-      ).timeout(const Duration(seconds: 10));
-
-      final fechaHoy = DateTime.now().toIso8601String();
-      await prefs.setString('estado_fecha_${widget.caso.id}', fechaHoy);
-      await prefs.setString('estado_local_${widget.caso.id}', 'enviado');
-      if (widget.planLocal != null) {
-        await prefs.setString('estado_plan_${widget.planLocal!.id}', 'enviado');
-      }
-      final ultimoId = prefs.getString('ultimo_caso_id');
-      if (ultimoId == widget.caso.id) {
-        await prefs.setString('ultimo_caso_estado', 'enviado');
-      }
-
-      // Actualizar estado local y notificar a CasosScreen
-      if (mounted) setState(() => _estadoActual = 'enviado');
-      widget.onEstadoCambiado?.call('enviado');
+      lista[idx] = {
+        ...(lista[idx] as Map<String, dynamic>),
+        'estado': 'enviado',
+      };
+      await prefs.setString('listados_sesiones', json.encode(lista));
     } catch (_) {
-      // Fallo silencioso: el export ya fue correcto
+      // El estado del caso ya se ha actualizado; no bloqueamos el envio por datos locales corruptos.
     }
   }
 

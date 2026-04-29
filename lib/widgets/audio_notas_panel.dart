@@ -150,7 +150,10 @@ class _AudioNotasPanelState extends State<AudioNotasPanel> {
                 Text('Notas de voz', style: TextStyle(color: AppTheme.darkText, fontSize: 14, fontWeight: FontWeight.w800)),
                 const Spacer(),
                 GestureDetector(
-                  onTap: () => Navigator.pop(context),
+                  onTap: () async {
+                    if (_grabando) await _pararGrabacion();
+                    if (mounted) Navigator.pop(context);
+                  },
                   child: Icon(Icons.close, size: 18, color: AppTheme.subtitleColor),
                 ),
               ]),
