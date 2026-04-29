@@ -5000,7 +5000,7 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
             if (_tapPendiente != null) ...[
               Positioned.fill(
                 child: GestureDetector(
-                  behavior: HitTestBehavior.translucent,
+                  behavior: HitTestBehavior.opaque,
                   onTap: () => setState(() => _tapPendiente = null),
                 ),
               ),
