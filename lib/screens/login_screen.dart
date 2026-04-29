@@ -67,7 +67,7 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
       final pass  = prefs.getString('login_password') ?? '';
       if (email.isNotEmpty && pass.isNotEmpty) {
         if (mounted) {
-          await _guardarTokenEnServidor();
+          await _guardarTokenEnServidor(_normalizarGrupo(email));
           Navigator.pushReplacement(context,
               MaterialPageRoute(builder: (_) => const MenuScreen()));
           return;
@@ -97,13 +97,22 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
     super.dispose();
   }
 
-  Future<void> _guardarTokenEnServidor() async {
+  String _normalizarGrupo(String usuario) {
+    final clean = usuario.trim();
+    if (clean.contains('@')) {
+      return clean.split('@').first.trim();
+    }
+    return clean;
+  }
+
+  Future<void> _guardarTokenEnServidor(String grupo) async {
     try {
+      if (grupo.isEmpty) return;
       final token = await FirebaseMessaging.instance.getToken();
       if (token == null) return;
       await http.post(
         Uri.parse('https://profesional.planificacionquirurgica.com/guardar_token.php'),
-        body: {'token': token},
+        body: {'grupo': grupo, 'token': token},
       );
     } catch (_) {}
   }
@@ -133,7 +142,7 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
         await prefs.setString('login_email', email);
         await prefs.setString('login_password', pass);
         await prefs.setBool('remember_me', _rememberMe);
-        await _guardarTokenEnServidor();
+        await _guardarTokenEnServidor(_normalizarGrupo(email));
         if (mounted) {
           Navigator.pushReplacement(context,
               MaterialPageRoute(builder: (_) => const MenuScreen()));
