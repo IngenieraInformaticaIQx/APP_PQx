@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:untitled/services/app_theme.dart';
 import 'login_screen.dart';
 import 'casos_screen.dart';
@@ -41,9 +42,11 @@ class _MenuScreenState extends State<MenuScreen>
   String? _ultimoCasoEstado;
 
   // ── Slider de frases ──────────────────────────────────────────────────────
-  final PageController _fraseController = PageController();
+  static const int _fraseOffset = 10000;
+  late final PageController _fraseController = PageController(initialPage: _fraseOffset);
   int _fraseActual = 0;
   Timer? _fraseTimer;
+  late final List<int> _fraseOrder = (List.generate(_frases.length, (i) => i)..shuffle(math.Random()));
 
   static const List<_Frase> _frases = [
     _Frase('«La precisión en la planificación\nes la primera incisión del cirujano»', Icons.precision_manufacturing_outlined),
@@ -61,6 +64,26 @@ class _MenuScreenState extends State<MenuScreen>
     _Frase('«Tecnología que guía\nmanos expertas»', Icons.psychology_outlined),
     _Frase('«Menos incertidumbre,\nmás control quirúrgico»', Icons.track_changes_outlined),
     _Frase('«Del análisis a la acción\ncon máxima exactitud»', Icons.play_circle_outline_outlined),
+    _Frase('«Un milímetro de error\npuede marcar la diferencia»', Icons.space_bar_outlined),
+    _Frase('«La anatomía habla;\nla planificación escucha»', Icons.hearing_outlined),
+    _Frase('«Cada implante tiene\nsu lugar exacto»', Icons.place_outlined),
+    _Frase('«La confianza del cirujano\nnace de la preparación»', Icons.verified_outlined),
+    _Frase('«Operar con certeza\nes el mayor arte»', Icons.auto_awesome_outlined),
+    _Frase('«El paciente no espera;\nla precisión tampoco»', Icons.access_time_outlined),
+    _Frase('«Anticipar el gesto quirúrgico\nantes de entrar al campo»', Icons.preview_outlined),
+    _Frase('«Datos que se convierten\nen decisiones que salvan»', Icons.bar_chart_outlined),
+    _Frase('«Modelar el futuro\nantes de intervenir el presente»', Icons.model_training_outlined),
+    _Frase('«La imagen 3D\nes el mapa del cirujano»', Icons.map_outlined),
+    _Frase('«Reducir variables\nes maximizar resultados»', Icons.compress_outlined),
+    _Frase('«El quirófano premia\na quien planificó»', Icons.emoji_events_outlined),
+    _Frase('«Cada hueso tiene\nsu historia y su solución»', Icons.auto_stories_outlined),
+    _Frase('«Tecnología que se convierte\nen segundos de vida»', Icons.timer_outlined),
+    _Frase('«Donde la geometría\nes cuestión de vida»', Icons.pentagon_outlined),
+    _Frase('«La planificación no sustituye\nal cirujano; lo potencia»', Icons.upgrade_outlined),
+    _Frase('«Ver el caso completo\nantes del primer corte»', Icons.zoom_out_map_outlined),
+    _Frase('«Innovación que no se nota\nen la sala; sí en el resultado»', Icons.trending_up_outlined),
+    _Frase('«La excelencia quirúrgica\ncomienza fuera del quirófano»', Icons.workspace_premium_outlined),
+    _Frase('«Planificar es cuidar\nantes de curar»', Icons.favorite_border_outlined),
   ];
 
   // ── Paleta ────────────────────────────────────────────────────────────────
@@ -92,7 +115,7 @@ class _MenuScreenState extends State<MenuScreen>
       subtitle: 'Casos clínicos quirúrgicos asignados',
       colorA: Color(0xFF34A853),
       colorB: Color(0xFF81C995),
-      tag: 'CLÍNICA',
+      tag: 'CASOS ASIGNADOS',
       imagenAsset: 'assets/images/SamitierSports.jpg',
     ),
     _MenuItem(
@@ -101,7 +124,7 @@ class _MenuScreenState extends State<MenuScreen>
       subtitle: 'Planificaciones y ediciones libres guardadas',
       colorA: Color(0xFFE8840A),
       colorB: Color(0xFFFFB74D),
-      tag: 'INFORMES',
+      tag: 'MODO LIBRE',
       imagenAsset: 'assets/images/medico.jpg',
     ),
 
@@ -185,9 +208,9 @@ class _MenuScreenState extends State<MenuScreen>
 
   void _startFraseTimer() {
     _fraseTimer = Timer.periodic(const Duration(seconds: 5), (_) {
-      if (!mounted) return;
-      final next = (_fraseActual + 1) % _frases.length;
-      _fraseController.animateToPage(next,
+      if (!mounted || !_fraseController.hasClients) return;
+      final nextPage = (_fraseController.page?.round() ?? _fraseOffset) + 1;
+      _fraseController.animateToPage(nextPage,
           duration: const Duration(milliseconds: 600),
           curve: Curves.easeInOut);
     });
@@ -432,21 +455,24 @@ class _MenuScreenState extends State<MenuScreen>
                   child: Row(children: [
 
                     // Logo glass compacto
-                    ClipRRect(borderRadius: BorderRadius.circular(16),
-                      child: BackdropFilter(filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
-                        child: Container(width: 48, height: 48,
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(colors: [
-                              Colors.white.withOpacity(0.70),
-                              Colors.white.withOpacity(0.45),
-                            ]),
-                            borderRadius: BorderRadius.circular(16),
-                            border: Border.all(color: Colors.white.withOpacity(0.85), width: 1.5),
-                            boxShadow: [BoxShadow(color: _accent.withOpacity(0.10),
-                                blurRadius: 14, offset: const Offset(0, 4))],
+                    GestureDetector(
+                      onTap: () => launchUrl(Uri.parse('https://planificacionquirurgica.com/'), mode: LaunchMode.externalApplication),
+                      child: ClipRRect(borderRadius: BorderRadius.circular(16),
+                        child: BackdropFilter(filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
+                          child: Container(width: 48, height: 48,
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(colors: [
+                                Colors.white.withOpacity(0.70),
+                                Colors.white.withOpacity(0.45),
+                              ]),
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(color: Colors.white.withOpacity(0.85), width: 1.5),
+                              boxShadow: [BoxShadow(color: _accent.withOpacity(0.10),
+                                  blurRadius: 14, offset: const Offset(0, 4))],
+                            ),
+                            child: Padding(padding: const EdgeInsets.all(7),
+                              child: Image.asset('assets/images/logo.png', fit: BoxFit.contain)),
                           ),
-                          child: Padding(padding: const EdgeInsets.all(7),
-                            child: Image.asset('assets/images/logo.png', fit: BoxFit.contain)),
                         ),
                       ),
                     ),
@@ -831,7 +857,7 @@ class _MenuScreenState extends State<MenuScreen>
               Expanded(child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('ACCESO RÁPIDO',
+                  Text('ACCESO RÁPIDO AL ULTIMO CASO MODIFICADO',
                       style: TextStyle(color: color, fontSize: 8.5,
                           fontWeight: FontWeight.w800, letterSpacing: 1.4)),
                   const SizedBox(height: 2),
@@ -875,10 +901,10 @@ class _MenuScreenState extends State<MenuScreen>
         height: 45,
         child: PageView.builder(
           controller: _fraseController,
-          itemCount: _frases.length,
-          onPageChanged: (i) => setState(() => _fraseActual = i),
+          itemCount: null, // infinito
+          onPageChanged: (i) => setState(() => _fraseActual = i % _frases.length),
           itemBuilder: (_, i) {
-            final frase = _frases[i];
+            final frase = _frases[_fraseOrder[i % _frases.length]];
             return Padding(
               padding: const EdgeInsets.symmetric(horizontal: 4),
               child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
@@ -901,18 +927,18 @@ class _MenuScreenState extends State<MenuScreen>
         ),
       ),
       const SizedBox(height: 8),
-      // Puntos indicadores
+      // Puntos indicadores (simbólicos: anterior · actual · siguiente)
       Row(mainAxisAlignment: MainAxisAlignment.center,
-        children: List.generate(_frases.length, (i) {
-          final active = i == _fraseActual;
+        children: List.generate(3, (i) {
+          final isCenter = i == 1;
           return AnimatedContainer(
             duration: const Duration(milliseconds: 300),
             margin: const EdgeInsets.symmetric(horizontal: 3),
-            width:  active ? 18 : 5,
+            width:  isCenter ? 18 : 5,
             height: 5,
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(3),
-              color: active
+              color: isCenter
                   ? _accent.withOpacity(0.55)
                   : AppTheme.darkText.withOpacity(0.15),
             ),

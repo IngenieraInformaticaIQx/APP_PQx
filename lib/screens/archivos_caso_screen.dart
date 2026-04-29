@@ -620,30 +620,46 @@ class _ArchivosCasoScreenState extends State<ArchivosCasoScreen>
   }
 
   void _verImagen(_Archivo img) {
-    showDialog(
-      context: context,
-      barrierColor: Colors.black.withOpacity(0.85),
-      builder: (dlgCtx) => GestureDetector(
-        onTap: () => Navigator.pop(dlgCtx),
-        child: Scaffold(
-          backgroundColor: Colors.transparent,
-          body: Center(
-            child: Hero(
-              tag: img.url,
-              child: InteractiveViewer(
+    Navigator.push(context, MaterialPageRoute(
+      builder: (ctx) => Scaffold(
+        backgroundColor: Colors.black,
+        body: Stack(children: [
+          Hero(
+            tag: img.url,
+            child: InteractiveViewer(
+              minScale: 0.5,
+              maxScale: 6.0,
+              child: SizedBox.expand(
                 child: Image.network(
                   img.url,
                   headers: {'Authorization': 'Basic $_credentials'},
                   fit: BoxFit.contain,
                   errorBuilder: (_, __, ___) =>
-                      const Icon(Icons.broken_image_outlined, color: Colors.white54, size: 64),
+                      const Center(child: Icon(Icons.broken_image_outlined, color: Colors.white54, size: 64)),
                 ),
               ),
             ),
           ),
-        ),
+          SafeArea(
+            child: Align(
+              alignment: Alignment.topLeft,
+              child: GestureDetector(
+                onTap: () => Navigator.pop(ctx),
+                child: Container(
+                  margin: const EdgeInsets.all(12),
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.black54,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Icon(Icons.close, color: Colors.white, size: 22),
+                ),
+              ),
+            ),
+          ),
+        ]),
       ),
-    );
+    ));
   }
 
   // Sin BackdropFilter

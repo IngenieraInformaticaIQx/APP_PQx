@@ -236,7 +236,7 @@ class _DetalleCasoScreenState extends State<DetalleCasoScreen>
                     size: size,
                     badge: 'ARCHIVOS',
                     titulo: 'Archivos',
-                    subtitulo: 'PDFs · Imágenes compartidas',
+                    subtitulo: 'PDFs · Imágenes · Notas',
                     accentColor: const Color(0xFF8E44AD),
                     accentColorLight: const Color(0xFFBE90D4),
                     icon: Icons.folder_open_rounded,

@@ -298,7 +298,7 @@ class _CasosScreenState extends State<CasosScreen>
                                 fontSize: 26,
                                 fontWeight: FontWeight.w800,
                                 letterSpacing: -0.5)),
-                        Text(_uid.isNotEmpty ? _uid : 'Casos quirúrgicos',
+                        Text('Tus casos asignados ${_uid.isNotEmpty ? _uid : 'Casos quirúrgicos'}',
                             style: TextStyle(
                                 color: AppTheme.subtitleColor,
                                 fontSize: 12,
