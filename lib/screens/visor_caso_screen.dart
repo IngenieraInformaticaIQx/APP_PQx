@@ -4975,7 +4975,15 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
             // Panel plano de corte
             if (_planoCortando) _buildPanelCorte(),
             // Popup de selección de tornillo
-            if (_tapPendiente != null) _buildScrewPopup(context),
+            if (_tapPendiente != null) ...[
+              Positioned.fill(
+                child: GestureDetector(
+                  behavior: HitTestBehavior.translucent,
+                  onTap: () => setState(() => _tapPendiente = null),
+                ),
+              ),
+              _buildScrewPopup(context),
+            ],
             // Etiqueta info tornillo al tocar un tornillo ya colocado
             if (_screwInfoTc != null) ...[
               Positioned.fill(
