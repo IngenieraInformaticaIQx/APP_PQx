@@ -481,16 +481,40 @@ class _VarvalZonaScreenState extends State<VarvalZonaScreen>
 
   bool _cargandoVisor = false;
 
-  static const _zonas = [
-    _VarvalZona(id: 'Tibial',  label: 'Tibial',
-        descripcion: 'Modelos 3D de la\ncomponente tibial',
-        icono: Icons.airline_seat_legroom_extra,
-        imagenAsset: null), // ej: 'assets/images/tibial.jpeg'
-    _VarvalZona(id: 'Femoral', label: 'Femoral',
-        descripcion: 'Modelos 3D de la\ncomponente femoral',
-        icono: Icons.accessibility_new,
-        imagenAsset:  'assets/images/logo.png'), // ej: 'assets/images/femoral.jpeg'
-  ];
+  static const _zonasPorOpcion = {
+    'Adicion': [
+      _VarvalZona(id: 'Tibial',  label: 'Tibial',
+          descripcion: 'Modelos 3D de la\ncomponente tibial',
+          icono: Icons.airline_seat_legroom_extra,
+          imagenAsset: 'assets/images/adicion tibial.png'),
+      _VarvalZona(id: 'Femoral', label: 'Femoral',
+          descripcion: 'Modelos 3D de la\ncomponente femoral',
+          icono: Icons.accessibility_new,
+          imagenAsset: 'assets/images/adicion femoral.png'), // ej: 'assets/images/adicion_femoral.jpeg'
+    ],
+    'Sustraccion': [
+      _VarvalZona(id: 'Tibial',  label: 'Tibial',
+          descripcion: 'Modelos 3D de la\ncomponente tibial',
+          icono: Icons.airline_seat_legroom_extra,
+          imagenAsset: 'assets/images/sustracion tibial.png'), // ej: 'assets/images/sustraccion_tibial.jpeg'
+      _VarvalZona(id: 'Femoral', label: 'Femoral',
+          descripcion: 'Modelos 3D de la\ncomponente femoral',
+          icono: Icons.accessibility_new,
+          imagenAsset: 'assets/images/sustracion femoral.png'), // ej: 'assets/images/sustraccion_femoral.jpeg'
+    ],
+    'Rotacion': [
+      _VarvalZona(id: 'Tibial',  label: 'Tibial',
+          descripcion: 'Modelos 3D de la\ncomponente tibial',
+          icono: Icons.airline_seat_legroom_extra,
+          imagenAsset: 'assets/images/rotacion tibial.png'), // ej: 'assets/images/rotacion_tibial.jpeg'
+      _VarvalZona(id: 'Femoral', label: 'Femoral',
+          descripcion: 'Modelos 3D de la\ncomponente femoral',
+          icono: Icons.accessibility_new,
+          imagenAsset: 'assets/images/rotacion femoral.png'), // ej: 'assets/images/rotacion_femoral.jpeg'
+    ],
+  };
+
+  List<_VarvalZona> get _zonas => _zonasPorOpcion[widget.opcion.id] ?? _zonasPorOpcion.values.first;
 
   void _onThemeChanged() { if (mounted) setState(() {}); }
 

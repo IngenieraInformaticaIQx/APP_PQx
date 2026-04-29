@@ -4136,7 +4136,7 @@ function animate(now){
     // Posición: desliza desde fuera hacia dentro
     sa.scene.position.lerpVectors(sa.startPos, sa.endPos, ease);
     // Rotación: gira sobre su propio eje mientras entra
-    const extraAngle=(1-ease)*sa.turns*Math.PI*2;
+    const extraAngle=-(1-ease)*sa.turns*Math.PI*2;
     sa.scene.quaternion.copy(sa.endQuat)
       .multiply(new THREE.Quaternion().setFromAxisAngle(sa.axis,extraAngle));
     needsRender=true;
@@ -5117,19 +5117,16 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
                     ),
                     const SizedBox(width: 9),
                     Expanded(
-                      child: Text('¿Qué tornillo insertar?',
-                          style: TextStyle(color: AppTheme.darkText, fontSize: 12,
+                      child: Text('Inserta un tornillo',
+                          style: TextStyle(color: AppTheme.darkText, fontSize: 16,
                               fontWeight: FontWeight.w700)),
                     ),
                     GestureDetector(
                       onTap: () => setState(() => _tapPendiente = null),
                       child: Container(
                         width: 26, height: 26,
-                        decoration: BoxDecoration(
-                          color: AppTheme.darkText.withOpacity(0.06),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Icon(Icons.close, color: AppTheme.subtitleColor, size: 14),
+
+
                       ),
                     ),
                   ]),
