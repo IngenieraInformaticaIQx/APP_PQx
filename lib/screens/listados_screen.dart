@@ -208,9 +208,9 @@ class _ListadosScreenState extends State<ListadosScreen>
                     _glassIconBtn(Icons.arrow_back_ios_new, () => Navigator.pop(context)),
                     const SizedBox(width: 16),
                     Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Text('Listados', style: TextStyle(color: AppTheme.darkText, fontSize: 26,
+                      Text('Mis planificaciones', style: TextStyle(color: AppTheme.darkText, fontSize: 26,
                           fontWeight: FontWeight.w800, letterSpacing: -0.5)),
-                      Text('Sesiones guardadas desde el Visor 3D',
+                      Text('Sesiones guardadas desde los visores 3D',
                           style: TextStyle(color: AppTheme.subtitleColor,
                               fontSize: 12, letterSpacing: 0.1)),
                     ])),

@@ -2970,15 +2970,23 @@ function toggleGlb(id,v){
         ? _guiasGlobalVisible && _trayectoriaGlbVisible(c) && !_trayectoriasOcupadas.has(_trayectoriaKey(c))
         : true;
     });
-    if(_cotasRxPorModelo[id]) _cotasRxPorModelo[id].visible = true;
+    if(modelos[id].userData && modelos[id].userData.esHueso){
+      if(_cotasRxPorModelo[id]){
+        _cotasRxPorModelo[id].visible = true;
+      } else {
+        _addCotasRx(id, modelos[id]);
+      }
+    }
   } else {
     modelos[id].traverse(c=>{
       if(c.isMesh && !c.userData.esTrayectoria) c.visible = false;
     });
+    modelos[id].visible = false;
     if(_cotasRxPorModelo[id]) _cotasRxPorModelo[id].visible = false;
   }
   _actualizarHuellaOrigen(id);
   _invalidarCacheMeshes();
+  needsRender = true;
 }
 function toggleGuias(v){
   _guiasGlobalVisible = v;

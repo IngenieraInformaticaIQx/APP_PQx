@@ -12,6 +12,7 @@ import 'dart:typed_data';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -102,6 +103,11 @@ class _ProcesandoIAScreenState extends State<ProcesandoIAScreen>
   bool   _error        = false;
   String _mensajeError = '';
   Timer? _pasoTimer;
+
+  // Estado del panel de confianza (se muestra entre el procesado y el visor).
+  RxProcessorResult? _resultadoListo;
+  CasoMedico?        _casoPreparado;
+  List<String>       _huesosSinReescalado = const [];
 
   static const Color _purple  = Color(0xFF8E44AD);
   static const Color _purpleL = Color(0xFFCE93D8);
@@ -205,34 +211,6 @@ class _ProcesandoIAScreenState extends State<ProcesandoIAScreen>
 
     if (!mounted) return;
 
-    if (huesosSinReescalado.isNotEmpty || result.errores.isNotEmpty) {
-      final detalles = <String>[
-        if (huesosSinReescalado.isNotEmpty)
-          'Sin reescalado: ${huesosSinReescalado.join(', ')}.',
-        if (result.errores.isNotEmpty) ...result.errores.map((e) => '• $e'),
-      ].join('\n');
-
-      await showDialog<void>(
-        context: context,
-        barrierDismissible: false,
-        builder: (_) => AlertDialog(
-          title: const Text('No se pudo reescalar completamente'),
-          content: SingleChildScrollView(
-            child: Text(
-              'Se han cargado biomodelos base para continuar.\n\n'
-              'Motivo(s):\n$detalles',
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Continuar'),
-            ),
-          ],
-        ),
-      );
-    }
-
     final catalogo = await _cargarCatalogoImplantesRx();
 
     final caso = CasoMedico(
@@ -246,6 +224,17 @@ class _ProcesandoIAScreenState extends State<ProcesandoIAScreen>
       tornillos:  catalogo.$2,
     );
 
+    if (!mounted) return;
+    setState(() {
+      _resultadoListo      = result;
+      _casoPreparado       = caso;
+      _huesosSinReescalado = huesosSinReescalado;
+    });
+  }
+
+  void _continuarAlVisor() {
+    final caso = _casoPreparado;
+    if (caso == null) return;
     Navigator.pushReplacement(
       context,
       MaterialPageRoute(
@@ -256,6 +245,19 @@ class _ProcesandoIAScreenState extends State<ProcesandoIAScreen>
         ),
       ),
     );
+  }
+
+  Future<void> _remedirRadiografia() async {
+    HapticFeedback.mediumImpact();
+    await RxProcessorService.limpiarCacheGemini();
+    if (!mounted) return;
+    setState(() {
+      _resultadoListo      = null;
+      _casoPreparado       = null;
+      _huesosSinReescalado = const [];
+      _pasoActual          = 0;
+    });
+    await _procesarFoto();
   }
 
   Future<(List<GrupoPlagas>, List<GrupoTornillos>)> _cargarCatalogoImplantesRx() async {
@@ -359,7 +361,8 @@ class _ProcesandoIAScreenState extends State<ProcesandoIAScreen>
 
   void _reintentar() {
     _pasoTimer?.cancel();
-    _procesarFoto();
+    if (!mounted) return;
+    Navigator.pop(context);
   }
 
   // ── Build ─────────────────────────────────────────────────────────────────────
@@ -421,20 +424,26 @@ class _ProcesandoIAScreenState extends State<ProcesandoIAScreen>
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          _error ? 'Error en el proceso' : 'Procesando IA',
+                          _error
+                              ? 'Error en el proceso'
+                              : (_resultadoListo != null
+                                  ? 'Análisis completado'
+                                  : 'Procesando IA'),
                           style: TextStyle(color: dark, fontSize: 24,
                               fontWeight: FontWeight.w800, letterSpacing: -0.5),
                         ),
                         Text(
                           _error
                               ? 'Algo salió mal'
-                              : 'Generando modelo 3D del tobillo',
+                              : (_resultadoListo != null
+                                  ? 'Revisa la calidad antes de continuar'
+                                  : 'Generando modelo 3D del tobillo'),
                           style: TextStyle(
                               color: AppTheme.subtitleColor, fontSize: 12),
                         ),
                       ],
                     )),
-                    if (!_error) _badgeIA(),
+                    if (!_error && _resultadoListo == null) _badgeIA(),
                   ]),
                 ),
               ),
@@ -446,7 +455,11 @@ class _ProcesandoIAScreenState extends State<ProcesandoIAScreen>
                 opacity: _entradaFade,
                 child: SlideTransition(
                   position: _entradaSlide,
-                  child: _error ? _buildError() : _buildProcesando(),
+                  child: _error
+                      ? _buildError()
+                      : (_resultadoListo != null
+                          ? _buildConfianza(_resultadoListo!)
+                          : _buildProcesando()),
                 ),
               ),
             ),
@@ -685,6 +698,141 @@ class _ProcesandoIAScreenState extends State<ProcesandoIAScreen>
           ),
         ),
       ]),
+    );
+  }
+
+  // ── Panel de confianza (entre procesado y visor) ─────────────────────────
+  // Stub mínimo funcional: muestra la confianza y deja continuar al visor o
+  // re-medir limpiando la caché. Diseño detallado pendiente.
+  Widget _buildConfianza(RxProcessorResult result) {
+    final dark = AppTheme.darkText;
+
+    Color colorConfianza() {
+      switch (result.confianza) {
+        case 'alta':  return Colors.green;
+        case 'media': return Colors.amber;
+        default:      return Colors.redAccent;
+      }
+    }
+
+    final discrepancias = (result.diagnostico['discrepancias'] as List?) ?? const [];
+    final bolaCv  = (result.diagnostico['bola_cv'] as num?)?.toDouble();
+    final bolas   = (result.diagnostico['bolas_detectadas'] as num?)?.toInt();
+    final factores = result.diagnostico['factores_escala'] as Map?;
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        // Pill de confianza
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: BoxDecoration(
+            color: colorConfianza().withOpacity(0.12),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: colorConfianza().withOpacity(0.45)),
+          ),
+          child: Row(children: [
+            Icon(Icons.verified_rounded, color: colorConfianza(), size: 20),
+            const SizedBox(width: 10),
+            Expanded(child: Text(
+              'Confianza: ${result.confianza.toUpperCase()} · ${result.metodoEscala}',
+              style: TextStyle(color: dark,
+                  fontSize: 13, fontWeight: FontWeight.w700),
+            )),
+          ]),
+        ),
+        const SizedBox(height: 14),
+
+        // Métricas
+        if (bolas != null || bolaCv != null)
+          _confCard(dark, 'Calibración', [
+            if (bolas != null) 'Bolas detectadas: $bolas / 3',
+            if (bolaCv != null) 'Dispersión bolas: ${(bolaCv * 100).toStringAsFixed(1)} %',
+          ]),
+        if (factores != null && factores.isNotEmpty)
+          _confCard(dark, 'Factores de escala', [
+            for (final e in factores.entries)
+              '${e.key}: ×${(e.value as num).toStringAsFixed(3)}',
+          ]),
+        if (discrepancias.isNotEmpty)
+          _confCard(dark, 'Discrepancias frontal/lateral',
+              discrepancias.map((e) => e.toString()).toList(),
+              accent: Colors.amber),
+        if (_huesosSinReescalado.isNotEmpty)
+          _confCard(dark, 'Huesos sin reescalado',
+              [_huesosSinReescalado.join(', ')], accent: Colors.amber),
+        if (result.errores.isNotEmpty)
+          _confCard(dark, 'Avisos', result.errores, accent: Colors.redAccent),
+
+        const SizedBox(height: 18),
+
+        // Botón continuar
+        GestureDetector(
+          onTap: _continuarAlVisor,
+          child: Container(
+            height: 54,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(17),
+              gradient: const LinearGradient(
+                colors: [_purple, _purpleL],
+                begin: Alignment.topLeft, end: Alignment.bottomRight,
+              ),
+              boxShadow: [BoxShadow(
+                color: _purple.withOpacity(0.32),
+                blurRadius: 16, offset: const Offset(0, 6))],
+            ),
+            child: const Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+              Icon(Icons.view_in_ar_rounded, color: Colors.white, size: 20),
+              SizedBox(width: 8),
+              Text('Abrir visor 3D',
+                  style: TextStyle(color: Colors.white,
+                      fontSize: 15, fontWeight: FontWeight.w700)),
+            ]),
+          ),
+        ),
+        const SizedBox(height: 10),
+
+        // Re-medir
+        TextButton.icon(
+          onPressed: _remedirRadiografia,
+          icon: Icon(Icons.refresh_rounded, color: _purple, size: 18),
+          label: Text('Re-medir con IA',
+              style: TextStyle(color: _purple, fontWeight: FontWeight.w600)),
+        ),
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: Text('Volver a las fotos',
+              style: TextStyle(color: AppTheme.subtitleColor, fontSize: 13)),
+        ),
+      ]),
+    );
+  }
+
+  Widget _confCard(Color dark, String titulo, List<String> lineas,
+      {Color? accent}) {
+    final c = accent ?? _purple;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppTheme.cardBg1,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: c.withOpacity(0.30)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(titulo, style: TextStyle(color: c,
+              fontSize: 11, fontWeight: FontWeight.w800, letterSpacing: 0.6)),
+          const SizedBox(height: 6),
+          for (final l in lineas)
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Text(l, style: TextStyle(color: dark.withOpacity(0.85),
+                  fontSize: 12.5, height: 1.4)),
+            ),
+        ],
+      ),
     );
   }
 
