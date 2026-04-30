@@ -30,6 +30,8 @@ const String _geminiUrl =
     'gemini-2.0-flash:generateContent?key=$_geminiApiKey';
 
 const double _ballDiameterMm = 9.98;
+const double _calibrationRodLengthMm = 96.30;
+const double _calibrationRodDiameterMm = 7.98;
 
 // Medidas reales de los modelos GLB base (en mm)
 const Map<String, double> _glbBaseMm = {
@@ -56,8 +58,11 @@ const Map<String, dynamic> _medidasAnatomicoEstandar = {
   'calcaneo_altura_mm':    52.8,
   'confianza':            'baja',
   'calibrado_con_bolas':  false,
+  'calibrado_con_barra':  false,
   'notas':                'Medidas anatómicas estándar (fallback sin calibración)',
   'diametro_bola_px':     0.0,
+  'barra_calibracion_longitud_px': 0.0,
+  'barra_calibracion_diametro_px': 0.0,
   'mm_por_px':            0.0,
 };
 
@@ -212,9 +217,13 @@ class RxProcessorService {
         diagnostico['bola_cv']                = mm['bola_cv'];
         diagnostico['bolas_detectadas']       = mm['bolas_detectadas'];
         diagnostico['mm_por_px']              = mm['mm_por_px'];
+        diagnostico['metodo_calibracion']     = mm['metodo_calibracion'];
+        diagnostico['barra_calibracion_longitud_px'] = mm['barra_calibracion_longitud_px'];
         diagnostico['usa_lateral_calc_long']  = mm['usa_lateral_calc_long'];
         diagnostico['discrepancias']          = mm['discrepancias_frontal_lateral'];
         diagnostico['notas_ia']               = raw['notas'];
+        diagnostico['cv_pasadas']             = raw['cv_pasadas'];
+        diagnostico['cv_max_pasadas']         = raw['cv_max_pasadas'];
       }
     } catch (e) {
       errores.add(e.toString().replaceAll('Exception: ', ''));
@@ -256,6 +265,11 @@ class RxProcessorService {
 
     stopwatch.stop();
     diagnostico['ms_total'] = stopwatch.elapsedMilliseconds;
+    diagnostico['fiabilidad_pct'] = _calcularFiabilidadPct(
+      confianza: confianza,
+      diagnostico: diagnostico,
+      errores: errores,
+    );
 
     return RxProcessorResult(
       glbBytes: glbBytes,
@@ -307,6 +321,8 @@ class RxProcessorService {
     'bola2_diametro_px',
     'bola3_diametro_px',
     'diametro_bola_px',
+    'barra_calibracion_longitud_px',
+    'barra_calibracion_diametro_px',
     'tibia_longitud_px',
     'tibia_anchura_px',
     'perone_longitud_px',
@@ -324,6 +340,8 @@ class RxProcessorService {
       List<Map<String, dynamic>> payloads) {
     final out = <String, dynamic>{};
     double maxCv = 0.0;
+    double cvPonderado = 0.0;
+    double pesoTotal = 0.0;
 
     for (final clave in _clavesPx) {
       final vals = <double>[];
@@ -345,20 +363,27 @@ class RxProcessorService {
                 vals.length;
         final cv = math.sqrt(varianza) / media;
         if (cv > maxCv) maxCv = cv;
+        final peso = _pesoConsenso(clave);
+        cvPonderado += cv * peso;
+        pesoTotal += peso;
       }
     }
 
     // CV alto entre pasadas → la IA no se pone de acuerdo consigo misma.
+    final cvMedio = pesoTotal > 0 ? cvPonderado / pesoTotal : maxCv;
+
     final String confianza;
-    if (maxCv < 0.08) {
+    if (cvMedio < 0.10 && maxCv < 0.22) {
       confianza = 'alta';
-    } else if (maxCv < 0.18) {
+    } else if (cvMedio < 0.22 && maxCv < 0.38) {
       confianza = 'media';
     } else {
       confianza = 'baja';
     }
     out['confianza'] = confianza;
     out['calibrado_con_bolas'] = true;
+    out['cv_pasadas'] = cvMedio;
+    out['cv_max_pasadas'] = maxCv;
     out['notas'] = 'Mediana de ${payloads.length} pasadas (CV máx ${(maxCv * 100).toStringAsFixed(1)}%)';
     return out;
   }
@@ -366,6 +391,56 @@ class RxProcessorService {
   // Segunda capa de defensa: aunque cada hueso esté en rango, sus relaciones
   // entre sí deben ser anatómicamente plausibles. Esto pilla casos donde
   // Gemini confunde unos huesos con otros o mide la rx de un implante distinto.
+  static double _pesoConsenso(String clave) {
+    if (clave.startsWith('barra_calibracion') ||
+        clave == 'diametro_bola_px' ||
+        clave.startsWith('bola')) {
+      return 2.0;
+    }
+    if (clave.contains('_lateral_')) return 0.5;
+    if (clave.contains('_longitud_')) return 1.5;
+    return 1.0;
+  }
+
+  static int _calcularFiabilidadPct({
+    required String confianza,
+    required Map<String, dynamic> diagnostico,
+    required List<String> errores,
+  }) {
+    double pct;
+    switch (confianza) {
+      case 'alta':
+        pct = 92;
+        break;
+      case 'media':
+        pct = 72;
+        break;
+      default:
+        pct = diagnostico['fallback'] != null ? 18 : 46;
+    }
+
+    final cvPasadas = diagnostico['cv_pasadas'];
+    if (cvPasadas is num) {
+      pct -= (cvPasadas.toDouble() * 120).clamp(0, 30).toDouble();
+    }
+
+    final cvMax = diagnostico['cv_max_pasadas'];
+    if (cvMax is num && cvMax > 0.30) {
+      pct -= ((cvMax.toDouble() - 0.30) * 80).clamp(0, 18).toDouble();
+    }
+
+    final bolaCv = diagnostico['bola_cv'];
+    if (bolaCv is num && bolaCv > 0.10) {
+      pct -= ((bolaCv.toDouble() - 0.10) * 120).clamp(0, 12).toDouble();
+    }
+
+    if (errores.isNotEmpty && diagnostico['fallback'] == null) {
+      pct -= math.min(18, errores.length * 6);
+    }
+
+    return pct.clamp(5, 98).round();
+  }
+
   static void _validarRatiosAnatomicos(Map<String, dynamic> mm) {
     double v(String k) => (mm[k] as num).toDouble();
     final problemas = <String>[];
@@ -476,8 +551,16 @@ Mide en la radiografía FRONTAL (en píxeles):
 - Astrágalo: anchura máxima y altura.
 - Calcáneo: longitud máxima y altura.$lateralBlock
 
+ANTES DE MEDIR:
+- Si la imagen es una lamina de prueba o una foto de una hoja con varios paneles, etiquetas "NO" y "SI", flechas, textos o recuadros, NO midas toda la hoja.
+- En ese caso usa solo el panel marcado "SI" como radiografia valida e ignora por completo el panel "NO", textos externos, flechas, circulos de anotacion, margenes blancos y recuadros.
+- Si dentro del panel "SI" hay dos proyecciones juntas, usa la frontal/AP para tibia, perone, astragalo, calcaneo y bolas. Usa la proyeccion lateral solo para las medidas laterales si se ve claramente.
+- Las medidas en pixeles deben estar tomadas sobre la radiografia seleccionada, no sobre el papel completo fotografiado.
+- No uses textos impresos como "Diametro", "Longitud" o "Izda." como referencias de medida.
+- Si ves una barra vertical radiopaca dentro de la radiografia, mide tambien "barra_calibracion_longitud_px" de punta a punta (${_calibrationRodLengthMm}mm reales) y "barra_calibracion_diametro_px" (${_calibrationRodDiameterMm}mm reales). La barra solo sirve como calibrador secundario.
+
 Responde SOLO con este JSON, sin texto adicional ni markdown:
-{"bola1_diametro_px":0,"bola2_diametro_px":0,"bola3_diametro_px":0,"bolas_detectadas":0,"diametro_bola_px":0,"tibia_longitud_px":0,"tibia_anchura_px":0,"perone_longitud_px":0,"perone_anchura_px":0,"astragalo_anchura_px":0,"astragalo_altura_px":0,"calcaneo_longitud_px":0,"calcaneo_altura_px":0$lateralFields,"calibrado_con_bolas":true,"confianza":"alta","notas":""}
+{"bola1_diametro_px":0,"bola2_diametro_px":0,"bola3_diametro_px":0,"bolas_detectadas":0,"diametro_bola_px":0,"barra_calibracion_longitud_px":0,"barra_calibracion_diametro_px":0,"tibia_longitud_px":0,"tibia_anchura_px":0,"perone_longitud_px":0,"perone_anchura_px":0,"astragalo_anchura_px":0,"astragalo_altura_px":0,"calcaneo_longitud_px":0,"calcaneo_altura_px":0$lateralFields,"calibrado_con_bolas":true,"confianza":"alta","notas":""}
 
 Reglas estrictas:
 - "bola1/2/3_diametro_px" valen 0 si NO ves esa bola con seguridad. NO INVENTES.
@@ -493,7 +576,7 @@ Reglas estrictas:
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
           'contents': [{'parts': parts}],
-          'generationConfig': {'temperature': 0.1, 'maxOutputTokens': 512},
+          'generationConfig': {'temperature': 0.0, 'maxOutputTokens': 768},
         }),
       ).timeout(const Duration(seconds: 60));
 
@@ -515,7 +598,7 @@ Reglas estrictas:
   // Hash NO criptográfico (suficiente para identificar imágenes en disco).
   // Versionamos con _cacheVersion: si cambia el prompt o el algoritmo,
   // sube el número y los entries antiguos se ignoran.
-  static const int _cacheVersion = 2;
+static const int _cacheVersion = 4;
 
   static String _imageCacheKey(Uint8List frontal, Uint8List? lateral) {
     int h = _cacheVersion * 0x01000193;
@@ -723,6 +806,70 @@ Reglas estrictas:
     }
   }
 
+  static Map<String, dynamic> _resolverCalibracion(Map<String, dynamic> raw) {
+    final bolaPx = (_numFlexible(raw, 'diametro_bola_px', aliases: const [
+      'diametro_bola_pixels',
+      'bola_diametro_px',
+      'ball_diameter_px',
+    ]) ?? 0.0);
+    final detectadas = _numFlexible(raw, 'bolas_detectadas');
+    final bolaCv = _numFlexible(raw, 'bola_cv');
+    final bolasOk = bolaPx > 0 &&
+        (detectadas == null || detectadas >= 2) &&
+        (bolaCv == null || bolaCv <= 0.18);
+
+    final barraLongPx = (_numFlexible(raw, 'barra_calibracion_longitud_px',
+            aliases: const [
+          'barra_longitud_px',
+          'longitud_barra_px',
+          'calibration_rod_length_px',
+          'rod_length_px',
+        ]) ??
+        0.0);
+    final barraDiamPx = (_numFlexible(raw, 'barra_calibracion_diametro_px',
+            aliases: const [
+          'barra_diametro_px',
+          'diametro_barra_px',
+          'calibration_rod_diameter_px',
+          'rod_diameter_px',
+        ]) ??
+        0.0);
+
+    if (bolasOk) {
+      return {
+        'mm_por_px': _ballDiameterMm / bolaPx,
+        'metodo_calibracion': 'bolas',
+        'diametro_bola_px': bolaPx,
+        'barra_calibracion_longitud_px': barraLongPx,
+        'barra_calibracion_diametro_px': barraDiamPx,
+      };
+    }
+
+    if (barraLongPx > 0) {
+      return {
+        'mm_por_px': _calibrationRodLengthMm / barraLongPx,
+        'metodo_calibracion': 'barra_longitud',
+        'diametro_bola_px': bolaPx,
+        'barra_calibracion_longitud_px': barraLongPx,
+        'barra_calibracion_diametro_px': barraDiamPx,
+      };
+    }
+
+    if (barraDiamPx > 0) {
+      return {
+        'mm_por_px': _calibrationRodDiameterMm / barraDiamPx,
+        'metodo_calibracion': 'barra_diametro',
+        'diametro_bola_px': bolaPx,
+        'barra_calibracion_longitud_px': barraLongPx,
+        'barra_calibracion_diametro_px': barraDiamPx,
+      };
+    }
+
+    throw Exception(
+      'Calibracion invalida: la IA no midio al menos 2 bolas ni la barra de calibracion',
+    );
+  }
+
   static Map<String, dynamic> _medidasMmDesdePixeles(Map<String, dynamic> raw) {
     double n(String key, {List<String> aliases = const []}) {
       final v = _numFlexible(raw, key, aliases: aliases);
@@ -730,15 +877,9 @@ Reglas estrictas:
       throw Exception('Falta "$key" en respuesta IA (aliases: ${aliases.join(', ')})');
     }
 
-    final bolaPx = n('diametro_bola_px', aliases: const [
-      'diametro_bola_pixels',
-      'bola_diametro_px',
-      'ball_diameter_px',
-    ]);
-    if (bolaPx <= 0) {
-      throw Exception('Calibración inválida: diametro_bola_px <= 0');
-    }
-    final mmPorPx = _ballDiameterMm / bolaPx;
+    final calibracion = _resolverCalibracion(raw);
+    final mmPorPx = calibracion['mm_por_px'] as double;
+    final bolaPx = calibracion['diametro_bola_px'] as double;
 
     // Helpers para medidas que pueden venir tanto de la frontal como de la
     // lateral. Para el calcáneo, la lateral es claramente mejor (vista
@@ -799,9 +940,13 @@ Reglas estrictas:
       'calcaneo_longitud_mm': calcLongMm,
       'calcaneo_altura_mm': calcAltMm,
       'confianza': raw['confianza'] ?? 'desconocida',
-      'calibrado_con_bolas': _boolFlexible(raw['calibrado_con_bolas']) || bolaPx > 0,
+      'calibrado_con_bolas': calibracion['metodo_calibracion'] == 'bolas',
+      'calibrado_con_barra': calibracion['metodo_calibracion'] != 'bolas',
+      'metodo_calibracion': calibracion['metodo_calibracion'],
       'notas': raw['notas'] ?? '',
       'diametro_bola_px': bolaPx,
+      'barra_calibracion_longitud_px': calibracion['barra_calibracion_longitud_px'],
+      'barra_calibracion_diametro_px': calibracion['barra_calibracion_diametro_px'],
       'mm_por_px': mmPorPx,
       'bola_cv': _numFlexible(raw, 'bola_cv'),
       'bolas_detectadas': _numFlexible(raw, 'bolas_detectadas'),
@@ -811,28 +956,7 @@ Reglas estrictas:
   }
 
   static void _validarPayloadCalibracionRaw(Map<String, dynamic> raw) {
-    final bolaPx = (_numFlexible(raw, 'diametro_bola_px', aliases: const [
-      'diametro_bola_pixels',
-      'bola_diametro_px',
-      'ball_diameter_px',
-    ]) ?? 0);
-    if (bolaPx <= 0) {
-      throw Exception('La IA no midió las bolas de calibración (diametro_bola_px = 0)');
-    }
-
-    // Si tenemos diámetros individuales, deben coincidir entre sí
-    // (las bolas son fabricadas idénticas).
-    final bolaCv = _numFlexible(raw, 'bola_cv');
-    if (bolaCv != null && bolaCv > 0.15) {
-      throw Exception(
-          'Las 3 bolas de calibración miden tamaños distintos (CV ${(bolaCv * 100).toStringAsFixed(1)}%) — '
-          'la IA probablemente confundió artefactos con bolas');
-    }
-    final detectadas = _numFlexible(raw, 'bolas_detectadas');
-    if (detectadas != null && detectadas < 2) {
-      throw Exception(
-          'IA solo detectó ${detectadas.toInt()} bolas — calibración insuficiente');
-    }
+    _resolverCalibracion(raw);
 
     const keys = <String>[
       'tibia_longitud_px',
@@ -877,6 +1001,14 @@ Reglas estrictas:
       out['calibrado_con_bolas'] ??= bola['detectada'] ?? bola['calibrada'];
     }
 
+    final barra = out['barra'] ?? out['barra_calibracion'];
+    if (barra is Map) {
+      out['barra_calibracion_longitud_px'] ??=
+          barra['longitud_px'] ?? barra['longitud_punta_a_punta_px'];
+      out['barra_calibracion_diametro_px'] ??=
+          barra['diametro_px'] ?? barra['ancho_px'];
+    }
+
     // Si la IA dio diámetros individuales por bola, derivamos un consenso.
     final bolasIndividuales = <double>[
       for (final k in const ['bola1_diametro_px',
@@ -911,6 +1043,18 @@ Reglas estrictas:
       'ball_diameter_px',
       'diametro_bola',
       'diametro_px_bola',
+    ]);
+    out['barra_calibracion_longitud_px'] ??= pick([
+      'barra_longitud_px',
+      'longitud_barra_px',
+      'calibration_rod_length_px',
+      'rod_length_px',
+    ]);
+    out['barra_calibracion_diametro_px'] ??= pick([
+      'barra_diametro_px',
+      'diametro_barra_px',
+      'calibration_rod_diameter_px',
+      'rod_diameter_px',
     ]);
 
     out['tibia_longitud_px'] ??= pick(['tibia_largo_px', 'tibia_length_px']);
