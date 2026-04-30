@@ -851,7 +851,7 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
         prefs.setString(casoKey, allEntries);
       }
       // Guardar estado completo para restaurar al volver
-      prefs.setString('estado_caso_${widget.caso.id}', json.encode({
+      final estadoCompleto = json.encode({
         'capas_visibles': capasVisibles,
         'tornillos': tornillosCompletos,
         'tornillos_sesion_actual': tornillosCompletos, // compatibilidad
@@ -863,7 +863,13 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
         'ghost_visible': _ghostVisible,
         'audio_notas_id': _audioNotasId,
         if (_visorStateCache != null) 'visor_state': _visorStateCache!,
-      }));
+      });
+      prefs.setString('estado_caso_${widget.caso.id}', estadoCompleto);
+      // Para planificaciones, también actualizar sesion_plan_ para que
+      // _restaurarSesionPlan recupere el desplazamiento al reabrir.
+      if (widget.planLocal != null) {
+        prefs.setString('sesion_plan_${widget.planLocal!.id}', estadoCompleto);
+      }
     });
   }
 
@@ -1430,6 +1436,8 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
         : null;
 
     if (visorState != null) {
+      // Precargar cache con el estado restaurado para que auto-save al salir tenga datos
+      _visorStateCache ??= Map<String, dynamic>.from(visorState as Map);
       final visorStateB64 = base64Encode(utf8.encode(json.encode(visorState)));
       _jsRun("if(window.visor&&window.visor.restaurarEstadoVisor)"
           "window.visor.restaurarEstadoVisor(JSON.parse(atob('$visorStateB64')));");
