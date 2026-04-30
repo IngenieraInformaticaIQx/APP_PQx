@@ -719,6 +719,14 @@ class _ProcesandoIAScreenState extends State<ProcesandoIAScreen>
     final bolaCv  = (result.diagnostico['bola_cv'] as num?)?.toDouble();
     final bolas   = (result.diagnostico['bolas_detectadas'] as num?)?.toInt();
     final factores = result.diagnostico['factores_escala'] as Map?;
+    final fiabilidadRaw = result.diagnostico['fiabilidad_pct'];
+    final fiabilidadPct = fiabilidadRaw is num
+        ? fiabilidadRaw.clamp(0, 100).round()
+        : (result.confianza == 'alta' ? 92 : result.confianza == 'media' ? 72 : 46);
+    final fiabilidad = fiabilidadPct / 100.0;
+    final cvPasadas = (result.diagnostico['cv_pasadas'] as num?)?.toDouble();
+    final metodoCalibracion = result.diagnostico['metodo_calibracion']?.toString();
+    final barraLongPx = (result.diagnostico['barra_calibracion_longitud_px'] as num?)?.toDouble();
 
     return SingleChildScrollView(
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
@@ -744,10 +752,39 @@ class _ProcesandoIAScreenState extends State<ProcesandoIAScreen>
         const SizedBox(height: 14),
 
         // Métricas
-        if (bolas != null || bolaCv != null)
+        Row(children: [
+          Expanded(child: Text('Fiabilidad',
+              style: TextStyle(color: dark.withOpacity(0.72),
+                  fontSize: 12, fontWeight: FontWeight.w700))),
+          Text('$fiabilidadPct%',
+              style: TextStyle(color: colorConfianza(),
+                  fontSize: 18, fontWeight: FontWeight.w900)),
+        ]),
+        const SizedBox(height: 8),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(999),
+          child: LinearProgressIndicator(
+            value: fiabilidad,
+            minHeight: 11,
+            backgroundColor: dark.withOpacity(0.10),
+            valueColor: AlwaysStoppedAnimation<Color>(colorConfianza()),
+          ),
+        ),
+        const SizedBox(height: 14),
+
+        if (bolas != null || bolaCv != null || cvPasadas != null)
           _confCard(dark, 'Calibración', [
             if (bolas != null) 'Bolas detectadas: $bolas / 3',
             if (bolaCv != null) 'Dispersión bolas: ${(bolaCv * 100).toStringAsFixed(1)} %',
+          ]),
+        if (cvPasadas != null)
+          _confCard(dark, 'Variacion de medicion IA', [
+            'CV entre pasadas: ${(cvPasadas * 100).toStringAsFixed(1)} %',
+          ]),
+        if (metodoCalibracion != null || barraLongPx != null)
+          _confCard(dark, 'Calibrador usado', [
+            if (metodoCalibracion != null) 'Metodo: $metodoCalibracion',
+            if (barraLongPx != null) 'Barra: ${barraLongPx.toStringAsFixed(1)} px',
           ]),
         if (factores != null && factores.isNotEmpty)
           _confCard(dark, 'Factores de escala', [
