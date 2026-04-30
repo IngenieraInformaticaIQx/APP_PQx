@@ -1438,17 +1438,40 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
     setState(() => _screwCounter = maxId);
   }
 
+  Future<void> _esperarModelosCargados(Set<int> indices,
+      {Duration timeout = const Duration(seconds: 10)}) async {
+    if (indices.isEmpty) return;
+    final objetivo = indices.map((i) => 'glb_$i').toSet();
+    final fin = DateTime.now().add(timeout);
+
+    while (DateTime.now().isBefore(fin)) {
+      final estado = await _exportarEstadoVisorJs();
+      final modelos = (estado?['modelos'] as Map?)?.cast<String, dynamic>();
+      if (modelos != null) {
+        final cargados = modelos.keys.toSet();
+        if (objetivo.every(cargados.contains)) return;
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 220));
+    }
+  }
+
   /// Restaura sesión completa: modelos 3D, notas, opacidades, colores, cámara.
   Future<void> _restaurarSesionCompleta(Map<String, dynamic> sesion) async {
     // 1. Capas y tornillos (misma lógica base)
     final tornillosKey = sesion.containsKey('tornillos') ? 'tornillos' : 'tornillos_sesion_actual';
+    final capasSesion = (sesion['capas_visibles'] as List? ?? [])
+        .cast<Map<String, dynamic>>();
+    final indicesCapas = capasSesion
+        .map((c) => c['indice'] as int?)
+        .whereType<int>()
+        .toSet();
     await _restaurarSesion({
       'capas_visibles': sesion['capas_visibles'],
       'tornillos_sesion_actual': sesion[tornillosKey],
     });
 
-    // 2. Esperar a que los GLBs carguen antes de reposicionar
-    await Future<void>.delayed(const Duration(milliseconds: 1200));
+    // 2. Esperar a que los GLBs visibles estén realmente en escena antes de reposicionar.
+    await _esperarModelosCargados(indicesCapas);
     if (!mounted) return;
 
     // 3. Restaurar posiciones/rotaciones de modelos + cámara en JS
