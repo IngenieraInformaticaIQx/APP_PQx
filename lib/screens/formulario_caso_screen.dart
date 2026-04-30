@@ -6,14 +6,18 @@
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:math' as math;
+import 'dart:typed_data';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'planificacion_local.dart';
+import 'rx_processor_service.dart';
 import 'visor_caso_screen.dart';
 import 'package:untitled/services/app_theme.dart';
 
@@ -77,10 +81,10 @@ class _ProcesandoIAScreenState extends State<ProcesandoIAScreen>
   // ── Estado ───────────────────────────────────────────────────────────────────
   static const _pasos = [
     'Preparando radiografías',
-    'Subiendo al servidor',
-    'Análisis con IA quirúrgica',
-    'Segmentación de huesos',
-    'Generando modelo 3D',
+    'Analizando radiografías con IA',
+    'Midiendo huesos en mm',
+    'Descargando modelos base',
+    'Escalando modelos 3D',
     'Finalizando',
   ];
 
@@ -139,94 +143,38 @@ class _ProcesandoIAScreenState extends State<ProcesandoIAScreen>
     super.dispose();
   }
 
-  // ── HTTP ─────────────────────────────────────────────────────────────────────
+  // ── Procesado local con Gemini + escala GLB ───────────────────────────────
 
-  Future<Map<String, dynamic>> _subirYProcesarFoto(String path) async {
-    final prefs = await SharedPreferences.getInstance();
-    final email = prefs.getString('login_email') ?? '';
-    final pass  = prefs.getString('login_password') ?? '';
-    final cred  = base64Encode(utf8.encode('$email:$pass'));
-
-    final request = http.MultipartRequest(
-      'POST',
-      Uri.parse('https://profesional.planificacionquirurgica.com/procesar_rx.php'),
-    )
-      ..headers['Authorization'] = 'Basic $cred'
-      ..files.add(await http.MultipartFile.fromPath('frontal', path));
-
-    if (widget.plan.fotoLateralPath != null) {
-      request.files.add(
-        await http.MultipartFile.fromPath('lateral', widget.plan.fotoLateralPath!),
-      );
-    }
-
-    final streamed = await request.send().timeout(const Duration(minutes: 3));
-    final respStr  = await streamed.stream.bytesToString();
-    debugPrint('procesar_rx → $respStr');
-
-    if (streamed.statusCode != 200) {
-      throw Exception('Error HTTP ${streamed.statusCode}: $respStr');
-    }
-
-    Map<String, dynamic> data;
-    try {
-      data = json.decode(respStr);
-    } catch (_) {
-      throw Exception('Respuesta inesperada del servidor:\n$respStr');
-    }
-
-    if (data['success'] != true) {
-      final msg    = data['message'] ?? 'Error desconocido';
-      final detail = data['detalle']?.toString() ?? '';
-      throw Exception(detail.isNotEmpty ? '$msg\n$detail' : msg);
-    }
-
-    final glbUrl = data['glb_url']?.toString() ?? '';
-    if (glbUrl.isEmpty) {
-      throw Exception('El servidor no devolvió una URL de modelo válida');
-    }
-
-    return data;
-  }
-
-  void _navegarAlVisor(Map<String, dynamic> data) {
+  Future<void> _navegarAlVisorConResult(RxProcessorResult result) async {
     if (!mounted) return;
 
+    const orden   = ['tibia', 'perone', 'astragalo', 'calcaneo'];
+    const nombres = {
+      'tibia':     'Tibia',
+      'perone':    'Peroné',
+      'astragalo': 'Astrágalo',
+      'calcaneo':  'Calcáneo',
+    };
+
+    final dir = await getTemporaryDirectory();
     final List<GlbArchivo> biomodelos = [];
-    final glbHuesos = data['glb_huesos'] as Map<String, dynamic>?;
 
-    if (glbHuesos != null && glbHuesos.isNotEmpty) {
-      const orden   = ['tibia', 'perone', 'astragalo', 'calcaneo'];
-      const nombres = {
-        'tibia':     'Tibia',
-        'perone':    'Peroné',
-        'astragalo': 'Astrágalo',
-        'calcaneo':  'Calcáneo',
-      };
-      for (final hueso in orden) {
-        final url = glbHuesos[hueso]?.toString() ?? '';
-        if (url.isNotEmpty) {
-          biomodelos.add(GlbArchivo(
-            nombre:  nombres[hueso] ?? hueso,
-            archivo: '$hueso.glb',
-            url:     url,
-            tipo:    'biomodelo',
-          ));
-        }
-      }
+    for (final hueso in orden) {
+      final bytes = result.glbBytes[hueso];
+      if (bytes == null) continue;
+      final file = File('${dir.path}/biomodelo_${widget.plan.id}_$hueso.glb');
+      await file.writeAsBytes(bytes);
+      biomodelos.add(GlbArchivo(
+        nombre:  nombres[hueso] ?? hueso,
+        archivo: '$hueso.glb',
+        url:     file.path,
+        tipo:    'biomodelo',
+      ));
     }
 
-    if (biomodelos.isEmpty) {
-      final glbUrl = data['glb_url']?.toString() ?? '';
-      if (glbUrl.isNotEmpty) {
-        biomodelos.add(GlbArchivo(
-          nombre:  'Modelo IA',
-          archivo: 'modelo.glb',
-          url:     glbUrl,
-          tipo:    'biomodelo',
-        ));
-      }
-    }
+    if (!mounted) return;
+
+    final catalogo = await _cargarCatalogoImplantesRx();
 
     final caso = CasoMedico(
       id:         widget.plan.id,
@@ -235,20 +183,63 @@ class _ProcesandoIAScreenState extends State<ProcesandoIAScreen>
       fechaOp:    widget.plan.fechaCirugia.toIso8601String(),
       estado:     'pendiente',
       biomodelos: biomodelos,
-      placas:     [],
-      tornillos:  [],
+      placas:     catalogo.$1,
+      tornillos:  catalogo.$2,
     );
 
     Navigator.pushReplacement(
       context,
       MaterialPageRoute(
         builder: (_) => VisorCasoScreen(
-          caso:      caso,
+          caso:       caso,
           autoCargar: true,
           planLocal:  widget.plan,
         ),
       ),
     );
+  }
+
+  Future<(List<GrupoPlagas>, List<GrupoTornillos>)> _cargarCatalogoImplantesRx() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final email = prefs.getString('login_email') ?? '';
+      final pass = prefs.getString('login_password') ?? '';
+      if (email.isEmpty || pass.isEmpty) {
+        return (const <GrupoPlagas>[], const <GrupoTornillos>[]);
+      }
+
+      final cred = base64Encode(utf8.encode('$email:$pass'));
+      final response = await http.get(
+        Uri.parse('https://profesional.planificacionquirurgica.com/listar_visores_genericos.php'),
+        headers: {'Authorization': 'Basic $cred'},
+      ).timeout(const Duration(seconds: 15));
+
+      if (response.statusCode != 200) {
+        return (const <GrupoPlagas>[], const <GrupoTornillos>[]);
+      }
+
+      final data = json.decode(response.body);
+      if (data is! Map<String, dynamic> || data['success'] != true) {
+        return (const <GrupoPlagas>[], const <GrupoTornillos>[]);
+      }
+
+      final visores = (data['visores'] as List? ?? [])
+          .map((e) => CasoMedico.fromJson(e as Map<String, dynamic>))
+          .toList();
+
+      if (visores.isEmpty) {
+        return (const <GrupoPlagas>[], const <GrupoTornillos>[]);
+      }
+
+      final casoCatalogo = visores.firstWhere(
+        (c) => c.nombre.toLowerCase().contains('tabal'),
+        orElse: () => visores.first,
+      );
+
+      return (casoCatalogo.placas, casoCatalogo.tornillos);
+    } catch (_) {
+      return (const <GrupoPlagas>[], const <GrupoTornillos>[]);
+    }
   }
 
   void _animarEspera() {
@@ -275,7 +266,17 @@ class _ProcesandoIAScreenState extends State<ProcesandoIAScreen>
     _animarEspera();
 
     try {
-      final data = await _subirYProcesarFoto(widget.plan.fotoPath!);
+      final frontalBytes = await File(widget.plan.fotoPath!).readAsBytes();
+      Uint8List? lateralBytes;
+      if (widget.plan.fotoLateralPath != null) {
+        lateralBytes = await File(widget.plan.fotoLateralPath!).readAsBytes();
+      }
+
+      final result = await RxProcessorService.procesar(
+        frontalImage: frontalBytes,
+        lateralImage: lateralBytes,
+      );
+
       if (!mounted) return;
 
       _pasoTimer?.cancel();
@@ -283,7 +284,7 @@ class _ProcesandoIAScreenState extends State<ProcesandoIAScreen>
       await Future.delayed(const Duration(milliseconds: 900));
       if (!mounted) return;
 
-      _navegarAlVisor(data);
+      await _navegarAlVisorConResult(result);
 
     } catch (e) {
       if (!mounted) return;
@@ -614,7 +615,7 @@ class _ProcesandoIAScreenState extends State<ProcesandoIAScreen>
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
-                    'Este proceso puede tardar hasta 3 minutos.\nNo cierres la aplicación.',
+                    'El análisis con IA puede tardar hasta 1 minuto.\nNo cierres la aplicación.',
                     style: TextStyle(
                         color: AppTheme.subtitleColor,
                         fontSize: 12, height: 1.45),
