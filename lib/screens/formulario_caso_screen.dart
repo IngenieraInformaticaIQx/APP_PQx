@@ -66,6 +66,16 @@ class ProcesandoIAScreen extends StatefulWidget {
 
 class _ProcesandoIAScreenState extends State<ProcesandoIAScreen>
     with TickerProviderStateMixin {
+  static const Map<String, String> _fallbackGlbUrls = {
+    'tibia':
+        'https://profesional.planificacionquirurgica.com/3D/Tabal/Biomodelo/Tibia.glb',
+    'perone':
+        'https://profesional.planificacionquirurgica.com/3D/Tabal/Biomodelo/Perone.glb',
+    'astragalo':
+        'https://profesional.planificacionquirurgica.com/3D/Tabal/Biomodelo/Astragalo.glb',
+    'calcaneo':
+        'https://profesional.planificacionquirurgica.com/3D/Tabal/Biomodelo/Calcaneo.glb',
+  };
 
   // ── Animaciones ──────────────────────────────────────────────────────────────
   late AnimationController _bgController;
@@ -158,10 +168,14 @@ class _ProcesandoIAScreenState extends State<ProcesandoIAScreen>
 
     final dir = await getTemporaryDirectory();
     final List<GlbArchivo> biomodelos = [];
+    final List<String> huesosSinReescalado = [];
 
     for (final hueso in orden) {
       final bytes = result.glbBytes[hueso];
-      if (bytes == null) continue;
+      if (bytes == null) {
+        huesosSinReescalado.add(hueso);
+        continue;
+      }
       final file = File('${dir.path}/biomodelo_${widget.plan.id}_$hueso.glb');
       await file.writeAsBytes(bytes);
       biomodelos.add(GlbArchivo(
@@ -172,7 +186,52 @@ class _ProcesandoIAScreenState extends State<ProcesandoIAScreen>
       ));
     }
 
+    // Si el procesado IA no devuelve algún hueso (o falla completo),
+    // completar con GLB base remoto para no arrancar el visor sin biomodelos.
+    final Set<String> yaIncluidos = biomodelos
+        .map((b) => b.archivo.replaceAll('.glb', '').toLowerCase())
+        .toSet();
+    for (final hueso in orden) {
+      if (yaIncluidos.contains(hueso)) continue;
+      final fallbackUrl = _fallbackGlbUrls[hueso];
+      if (fallbackUrl == null || fallbackUrl.isEmpty) continue;
+      biomodelos.add(GlbArchivo(
+        nombre: nombres[hueso] ?? hueso,
+        archivo: '$hueso.glb',
+        url: fallbackUrl,
+        tipo: 'biomodelo',
+      ));
+    }
+
     if (!mounted) return;
+
+    if (huesosSinReescalado.isNotEmpty || result.errores.isNotEmpty) {
+      final detalles = <String>[
+        if (huesosSinReescalado.isNotEmpty)
+          'Sin reescalado: ${huesosSinReescalado.join(', ')}.',
+        if (result.errores.isNotEmpty) ...result.errores.map((e) => '• $e'),
+      ].join('\n');
+
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => AlertDialog(
+          title: const Text('No se pudo reescalar completamente'),
+          content: SingleChildScrollView(
+            child: Text(
+              'Se han cargado biomodelos base para continuar.\n\n'
+              'Motivo(s):\n$detalles',
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Continuar'),
+            ),
+          ],
+        ),
+      );
+    }
 
     final catalogo = await _cargarCatalogoImplantesRx();
 
