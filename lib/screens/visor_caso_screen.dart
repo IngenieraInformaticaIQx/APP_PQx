@@ -843,7 +843,9 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
     };
 
     SharedPreferences.getInstance().then((prefs) {
-      prefs.setString('ultimo_caso_visibles', indices.join(','));
+      final vis = indices.join(',');
+      prefs.setString('ultimo_caso_visibles', vis); // compatibilidad legado
+      prefs.setString('ultimo_caso_visibles_${widget.caso.id}', vis);
       if (tornillosEntries.isNotEmpty) {
         final casoKey = 'historial_tornillos_${widget.caso.id}';
         final existing = prefs.getString(casoKey) ?? '';
@@ -1337,9 +1339,15 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
 
     // Leer qué índices estaban visibles la última vez
     final prefs     = await SharedPreferences.getInstance();
-    final raw       = prefs.getString('ultimo_caso_visibles') ?? '';
+    final rawCaso   = prefs.getString('ultimo_caso_visibles_${widget.caso.id}') ?? '';
+    final rawGlobal = prefs.getString('ultimo_caso_visibles') ?? '';
+    final raw       = rawCaso.isNotEmpty ? rawCaso : rawGlobal;
     final Set<int> indices;
-    if (raw.isNotEmpty) {
+    final bool esRxNuevo = widget.autoCargar && widget.planLocal != null;
+    if (esRxNuevo) {
+      // En RX recién generado, iniciar solo con biomodelos.
+      indices = { for (int i = 0; i < widget.caso.biomodelos.length; i++) i };
+    } else if (raw.isNotEmpty) {
       indices = raw.split(',').map((s) => int.tryParse(s.trim()) ?? -1)
           .where((i) => i >= 0 && i < n).toSet();
     } else {
@@ -1347,11 +1355,15 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
       indices = { for (int i = 0; i < widget.caso.biomodelos.length; i++) i };
     }
 
+    final efectivos = indices.isEmpty
+        ? { for (int i = 0; i < widget.caso.biomodelos.length; i++) i }
+        : indices;
+
     if (!mounted) return;
     setState(() {
-      for (int i = 0; i < n; i++) _visibles[i] = indices.contains(i);
+      for (int i = 0; i < n; i++) _visibles[i] = efectivos.contains(i);
     });
-    for (final i in indices) {
+    for (final i in efectivos) {
       if (_glbCache.containsKey(i)) {
         _jsRun("window.visor.cargarGlbBase64('glb_$i','${_glbCache[i]}');");
       } else {
