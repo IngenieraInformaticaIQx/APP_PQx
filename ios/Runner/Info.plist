@@ -4,6 +4,10 @@
 <dict>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>Para capturar radiografías frontal y lateral del caso</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Para seleccionar y gestionar imágenes médicas del caso</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
     <string>Para guardar capturas del visor 3D</string>
 	<key>NSMicrophoneUsageDescription</key>

@@ -295,6 +295,7 @@ const _kRegExpPrefijo  = r'^[\d.x]+\s+';
 
 class _VisorCasoScreenState extends State<VisorCasoScreen> {
   late final WebViewController _webController;
+  bool get _mostrarCotasRx => widget.planLocal != null;
 
   // Cache de parseo de tornillos: evita reejecutar RegExp en cada rebuild
   final Map<String, Map<String, dynamic>> _tornilloParseCache = {};
@@ -506,6 +507,7 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
 
           final numBio = widget.caso.biomodelos.length;
           _jsRun('window._numBiomodelos = $numBio;');
+          _jsRun('window._showRxDimensions = ${_mostrarCotasRx ? 'true' : 'false'};');
 
           final nombreEsc = widget.caso.nombre.replaceAll("'", "");
           final pacienteEsc = widget.caso.paciente.replaceAll("'", "");
@@ -723,6 +725,7 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
     _jsRun('window.visor.setBackground(${AppTheme.isDark.value});');
     final numBio = widget.caso.biomodelos.length;
     _jsRun('window._numBiomodelos = $numBio;');
+    _jsRun('window._showRxDimensions = ${_mostrarCotasRx ? 'true' : 'false'};');
     final nombreEsc = widget.caso.nombre.replaceAll("'", "");
     final pacienteEsc = widget.caso.paciente.replaceAll("'", "");
     _jsRun("document.getElementById('wm-nombre').textContent='$nombreEsc';");
@@ -881,22 +884,29 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
     _cargandoNotifiers[idx]?.value = true;
     try {
       final glb = widget.caso.todosGlb[idx];
-      // Los GLB generados por IA son URLs públicas que NO requieren
-      // autenticación Basic. Solo añadimos la cabecera para URLs del
-      // servidor propio (planificacionquirurgica.com).
-      final esUrlPropia = glb.url.contains('planificacionquirurgica.com');
-      final headers = esUrlPropia && _credencial.isNotEmpty
-          ? {'Authorization': 'Basic $_credencial'}
-          : <String, String>{};
-      final res = await http.get(Uri.parse(glb.url), headers: headers)
-          .timeout(const Duration(seconds: 60));
-      if (res.statusCode == 200) {
-        final b64 = base64Encode(res.bodyBytes);
-        _glbCache[idx] = b64;
-        _jsRun("window.visor.cargarGlbBase64('glb_$idx','$b64');");
+      final String b64;
+
+      if (!glb.url.startsWith('http')) {
+        // Ruta local: biomodelo escalado en el dispositivo
+        final bytes = await File(glb.url).readAsBytes();
+        b64 = base64Encode(bytes);
       } else {
-        debugPrint('❌ GLB $idx HTTP \${res.statusCode}: \${glb.url}');
+        // URL remota — añadir cabecera Basic solo para el servidor propio
+        final esUrlPropia = glb.url.contains('planificacionquirurgica.com');
+        final headers = esUrlPropia && _credencial.isNotEmpty
+            ? {'Authorization': 'Basic $_credencial'}
+            : <String, String>{};
+        final res = await http.get(Uri.parse(glb.url), headers: headers)
+            .timeout(const Duration(seconds: 60));
+        if (res.statusCode != 200) {
+          debugPrint('❌ GLB $idx HTTP ${res.statusCode}: ${glb.url}');
+          return;
+        }
+        b64 = base64Encode(res.bodyBytes);
       }
+
+      _glbCache[idx] = b64;
+      _jsRun("window.visor.cargarGlbBase64('glb_$idx','$b64');");
     } catch (e) {
       debugPrint('❌ GLB $idx: $e');
     } finally {
@@ -1898,6 +1908,7 @@ const loader = new GLTFLoader(); loader.setDRACOLoader(draco);
 const modelos      = {};
 const catalogoGltf = {};
 const _coloresGlb  = {}; // color override por id
+const _cotasRxPorModelo = {}; // id_glb -> THREE.Group con cotas
 const trayectorias = {}; // id_glb → [{pos, dir, name}]
 const raycaster    = new THREE.Raycaster();
 const pointer      = new THREE.Vector2();
@@ -2208,6 +2219,84 @@ function b64ToBuffer(b64){
   return buf;
 }
 
+function _crearSpriteCota(texto){
+  const canvas = document.createElement('canvas');
+  canvas.width = 180;
+  canvas.height = 54;
+  const ctx = canvas.getContext('2d');
+  _roundRect(ctx, 0, 0, 180, 54, 12);
+  ctx.fillStyle = 'rgba(8,12,20,0.82)';
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(100,210,255,0.7)';
+  ctx.lineWidth = 2;
+  _roundRect(ctx, 1, 1, 178, 52, 11);
+  ctx.stroke();
+  ctx.fillStyle = '#64D2FF';
+  ctx.font = '700 22px -apple-system,sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(texto, 90, 27);
+  const tex = new THREE.CanvasTexture(canvas);
+  const mat = new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true });
+  const sprite = new THREE.Sprite(mat);
+  sprite.renderOrder = 1001;
+  return sprite;
+}
+
+function _crearLineaCota(p1, p2){
+  const geo = new THREE.BufferGeometry().setFromPoints([p1, p2]);
+  const mat = new THREE.LineBasicMaterial({ color: 0x64D2FF, depthTest: false });
+  const line = new THREE.Line(geo, mat);
+  line.renderOrder = 1000;
+  return line;
+}
+
+function _addCotasRx(modeloId, root){
+  if(!(window._showRxDimensions === true)) return;
+  if(!root || !root.userData || !root.userData.esHueso) return;
+  if(_cotasRxPorModelo[modeloId]){
+    scene.remove(_cotasRxPorModelo[modeloId]);
+    _cotasRxPorModelo[modeloId].traverse(c=>{
+      if(c.geometry) c.geometry.dispose();
+      if(c.material){
+        if(c.material.map) c.material.map.dispose();
+        c.material.dispose();
+      }
+    });
+    delete _cotasRxPorModelo[modeloId];
+  }
+  root.updateWorldMatrix(true, true);
+  const box = new THREE.Box3().setFromObject(root);
+  if(box.isEmpty()) return;
+  const size = box.getSize(new THREE.Vector3());
+  const min = box.min.clone();
+  const max = box.max.clone();
+
+  const group = new THREE.Group();
+  group.name = 'rx_cotas_' + modeloId;
+  group.userData.esCotaRx = true;
+
+  const pLenA = new THREE.Vector3(min.x, min.y, max.z);
+  const pLenB = new THREE.Vector3(min.x, max.y, max.z);
+  const pWidA = new THREE.Vector3(min.x, min.y, max.z);
+  const pWidB = new THREE.Vector3(max.x, min.y, max.z);
+  group.add(_crearLineaCota(pLenA, pLenB));
+  group.add(_crearLineaCota(pWidA, pWidB));
+
+  const lenLabel = _crearSpriteCota(size.y.toFixed(1) + ' mm');
+  lenLabel.position.copy(pLenA.clone().lerp(pLenB, 0.5).add(new THREE.Vector3(-3.5, 0, 0)));
+  lenLabel.scale.set(8, 2.4, 1);
+  group.add(lenLabel);
+
+  const widLabel = _crearSpriteCota(size.x.toFixed(1) + ' mm');
+  widLabel.position.copy(pWidA.clone().lerp(pWidB, 0.5).add(new THREE.Vector3(0, -3.5, 0)));
+  widLabel.scale.set(8, 2.4, 1);
+  group.add(widLabel);
+
+  scene.add(group);
+  _cotasRxPorModelo[modeloId] = group;
+}
+
 // ── Orientar y posicionar tornillo ─────────────────────────────────────────
 // hitNormal: normal exterior de la cara (apunta hacia la cámara, hacia fuera del objeto)
 // hitPoint:  punto 3D exacto del impacto
@@ -2412,6 +2501,7 @@ function cargarGlbBase64(id, b64){
       gltf.scene.userData.origPos = gltf.scene.position.clone();
       gltf.scene.userData.origQuat = gltf.scene.quaternion.clone();
       modelos[id]=gltf.scene;
+      if(esHueso) _addCotasRx(id, gltf.scene);
       if(!esHueso) _crearHuellaOrigen(id, gltf.scene);
       _actualizarHuellaOrigen(id);
       _invalidarCacheMeshes(); // el nuevo modelo cambia la escena
@@ -2845,10 +2935,12 @@ function toggleGlb(id,v){
         ? _guiasGlobalVisible && _trayectoriaGlbVisible(c) && !_trayectoriasOcupadas.has(_trayectoriaKey(c))
         : true;
     });
+    if(_cotasRxPorModelo[id]) _cotasRxPorModelo[id].visible = true;
   } else {
     modelos[id].traverse(c=>{
       if(c.isMesh && !c.userData.esTrayectoria) c.visible = false;
     });
+    if(_cotasRxPorModelo[id]) _cotasRxPorModelo[id].visible = false;
   }
   _actualizarHuellaOrigen(id);
   _invalidarCacheMeshes();
@@ -3202,6 +3294,18 @@ function resetCamara(){
 }
 
 function limpiarTodo(){
+  for(const id in _cotasRxPorModelo){
+    const g = _cotasRxPorModelo[id];
+    scene.remove(g);
+    g.traverse(c=>{
+      if(c.geometry) c.geometry.dispose();
+      if(c.material){
+        if(c.material.map) c.material.map.dispose();
+        c.material.dispose();
+      }
+    });
+    delete _cotasRxPorModelo[id];
+  }
   // 1. Eliminar todos los GLBs cargados (los tornillos son hijos de sus placas, se limpian con ellas)
   for(const id in modelos){
     const obj = modelos[id];
@@ -4587,6 +4691,7 @@ window.addEventListener('resize',()=>{
   needsRender = true;
 });
 window._numBiomodelos = 0; // se sobreescribe desde Flutter antes de cargar GLBs
+window._showRxDimensions = false; // true solo en flujo de radiografia
 setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorReady.postMessage('ready'); },500);
 </script>
 </body>
