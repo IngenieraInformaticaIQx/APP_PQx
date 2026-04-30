@@ -4671,9 +4671,11 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
           child: Stack(children: [
             Positioned.fill(
               top: 64,
-              child: ClipRRect(
-                borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-                child: Platform.isWindows
+              child: AbsorbPointer(
+                absorbing: _tapPendiente != null,
+                child: ClipRRect(
+                  borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+                  child: Platform.isWindows
                     ? VisorWindows(
                         key: _visorWindowsKey,
                         htmlContent: _buildHtmlWindows(),
@@ -4779,6 +4781,7 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
                     ),
                   },
                 ),
+              ),
               ),
             ),
             // Orbe azul decorativo (esquina superior derecha, fuera del WebView)
