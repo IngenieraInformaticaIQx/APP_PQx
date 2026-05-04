@@ -38,6 +38,11 @@ class _MisPlanificacionesLocalesScreenState
   List<PlanificacionLocal> _planes = [];
   bool _cargando = true;
   final Map<String, String> _estadosPlan = {};
+  String? _planSeleccionadoId;
+  double _previewRotX = -0.18;
+  double _previewRotY = 0.35;
+  double _previewZoom = 1.0;
+  Offset _previewPan = Offset.zero;
 
   static const Color _accent   = Color(0xFF2A7FF5);
 
@@ -76,8 +81,22 @@ class _MisPlanificacionesLocalesScreenState
       merged.removeWhere((k, _) => !lista.any((p) => p.id == k));
       merged.addAll(estados);
       _estadosPlan..clear()..addAll(merged);
+      if (lista.isEmpty) {
+        _planSeleccionadoId = null;
+      } else if (_planSeleccionadoId == null ||
+          !lista.any((p) => p.id == _planSeleccionadoId)) {
+        _planSeleccionadoId = lista.first.id;
+      }
       _cargando = false;
     });
+  }
+
+  PlanificacionLocal? get _planSeleccionado {
+    if (_planes.isEmpty) return null;
+    for (final plan in _planes) {
+      if (plan.id == _planSeleccionadoId) return plan;
+    }
+    return _planes.first;
   }
 
   @override
@@ -91,9 +110,9 @@ class _MisPlanificacionesLocalesScreenState
   // ── Abrir visor de una planificación ya guardada ──────────────────────────
   Future<void> _abrirPlan(PlanificacionLocal plan) async {
     if (plan.tipoVisor == TipoVisor.radiografia) {
-      // Flujo radiografía: muestra pantalla procesado / resultado IA
+      // Flujo radiografia: medicion manual milimetrica, sin API externa.
       Navigator.push(context,
-          MaterialPageRoute(builder: (_) => ProcesandoIAScreen(plan: plan)));
+          MaterialPageRoute(builder: (_) => MedicionManualMilimetricaScreen(plan: plan)));
       return;
     }
     // Flujo visor 3D: carga el visor genérico
@@ -258,19 +277,23 @@ class _MisPlanificacionesLocalesScreenState
                   ? _buildLoader()
                   : _planes.isEmpty
                       ? _buildEmpty()
-                      : RefreshIndicator(
-                          onRefresh: _cargar,
-                          color: _accent,
-                          child: ListView.builder(
-                            physics: const BouncingScrollPhysics(),
-                            padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-                            itemCount: _planes.length,
-                            itemBuilder: (_, i) => Padding(
-                              padding: const EdgeInsets.only(bottom: 12),
-                              child: _buildCard(_planes[i]),
+                      : LayoutBuilder(builder: (context, constraints) {
+                          final desktop = constraints.maxWidth >= 980;
+                          if (desktop) return _buildDesktopWorkspace(_dark);
+                          return RefreshIndicator(
+                            onRefresh: _cargar,
+                            color: _accent,
+                            child: ListView.builder(
+                              physics: const BouncingScrollPhysics(),
+                              padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+                              itemCount: _planes.length,
+                              itemBuilder: (_, i) => Padding(
+                                padding: const EdgeInsets.only(bottom: 12),
+                                child: _buildCard(_planes[i]),
+                              ),
                             ),
-                          ),
-                        ),
+                          );
+                        }),
             ),
           ]),
         ),
@@ -298,6 +321,355 @@ class _MisPlanificacionesLocalesScreenState
   }
 
   // ── Card de cada planificación ─────────────────────────────────────────────
+
+  Widget _buildDesktopWorkspace(Color dark) {
+    final selected = _planSeleccionado;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        SizedBox(width: 220, child: _buildDesktopSidebar(dark)),
+        const SizedBox(width: 14),
+        SizedBox(width: 410, child: _buildDesktopList(dark)),
+        const SizedBox(width: 14),
+        Expanded(child: _buildPreviewPanel(dark, selected)),
+      ]),
+    );
+  }
+
+  Widget _buildDesktopSidebar(Color dark) {
+    final rx = _planes.where((p) => p.tipoVisor == TipoVisor.radiografia).length;
+    final tabal = _planes.where((p) => p.tipoVisor == TipoVisor.tabal).length;
+    final varval = _planes.where((p) => p.tipoVisor == TipoVisor.varval).length;
+    final enviados = _estadosPlan.values.where((e) => e == 'enviado').length;
+    final pendientes = _estadosPlan.values.where((e) => e == 'pendiente').length;
+
+    return _desktopSurface(
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Row(children: [
+          Container(
+            width: 38, height: 38,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(11),
+              color: _accent.withOpacity(0.12),
+              border: Border.all(color: _accent.withOpacity(0.24)),
+            ),
+            child: const Icon(Icons.dashboard_customize_outlined,
+                color: _accent, size: 20),
+          ),
+          const SizedBox(width: 10),
+          Expanded(child: Text('Panel',
+              style: TextStyle(color: dark, fontSize: 17,
+                  fontWeight: FontWeight.w800))),
+        ]),
+        const SizedBox(height: 18),
+        _desktopMetric('Total', _planes.length.toString(), _accent),
+        _desktopMetric('RX manual', rx.toString(), const Color(0xFF8E44AD)),
+        _desktopMetric('Tabal', tabal.toString(), const Color(0xFF2A7FF5)),
+        _desktopMetric('Varval', varval.toString(), const Color(0xFF34A853)),
+        const Spacer(),
+        _desktopMetric('Pendientes', pendientes.toString(), const Color(0xFFE8840A)),
+        _desktopMetric('Enviados', enviados.toString(), const Color(0xFF34A853)),
+        const SizedBox(height: 16),
+        OutlinedButton.icon(
+          onPressed: _cargar,
+          icon: const Icon(Icons.refresh_rounded, size: 17),
+          label: const Text('Actualizar'),
+        ),
+      ]),
+    );
+  }
+
+  Widget _desktopMetric(String label, String value, Color color) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.08),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: color.withOpacity(0.18)),
+        ),
+        child: Row(children: [
+          Expanded(child: Text(label,
+              style: TextStyle(color: AppTheme.subtitleColor, fontSize: 11.5,
+                  fontWeight: FontWeight.w700))),
+          Text(value,
+              style: TextStyle(color: color, fontSize: 14,
+                  fontWeight: FontWeight.w900)),
+        ]),
+      ),
+    );
+  }
+
+  Widget _buildDesktopList(Color dark) {
+    return _desktopSurface(
+      padding: EdgeInsets.zero,
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(14, 14, 14, 8),
+          child: Row(children: [
+            Expanded(child: Text('Casos',
+                style: TextStyle(color: dark, fontSize: 17,
+                    fontWeight: FontWeight.w800))),
+            Text('${_planes.length}',
+                style: TextStyle(color: AppTheme.subtitleColor,
+                    fontSize: 12, fontWeight: FontWeight.w800)),
+          ]),
+        ),
+        Divider(height: 1, color: AppTheme.cardBorder),
+        Expanded(
+          child: ListView.builder(
+            padding: const EdgeInsets.all(10),
+            itemCount: _planes.length,
+            itemBuilder: (_, i) {
+              final plan = _planes[i];
+              final selected = plan.id == _planSeleccionado?.id;
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: _buildCompactPlanTile(plan, selected: selected),
+              );
+            },
+          ),
+        ),
+      ]),
+    );
+  }
+
+  Widget _buildCompactPlanTile(PlanificacionLocal plan, {required bool selected}) {
+    final acent = _colorVisor(plan.tipoVisor);
+    return InkWell(
+      borderRadius: BorderRadius.circular(12),
+      onTap: () => setState(() => _planSeleccionadoId = plan.id),
+      onDoubleTap: () => _abrirPlan(plan),
+      onLongPress: () => _confirmarEliminar(plan),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 160),
+        padding: const EdgeInsets.all(11),
+        decoration: BoxDecoration(
+          color: selected ? acent.withOpacity(0.12) : AppTheme.cardBg2,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: selected ? acent.withOpacity(0.45) : AppTheme.cardBorder,
+            width: selected ? 1.5 : 1,
+          ),
+        ),
+        child: Row(children: [
+          Container(
+            width: 36, height: 36,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(10),
+              color: acent.withOpacity(0.12),
+            ),
+            child: Center(child: Text(plan.zonaIcono,
+                style: const TextStyle(fontSize: 18))),
+          ),
+          const SizedBox(width: 10),
+          Expanded(child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(plan.nombrePaciente,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(color: AppTheme.darkText, fontSize: 13,
+                      fontWeight: FontWeight.w800)),
+              const SizedBox(height: 2),
+              Text('${plan.zonaLabel}  ·  ${_fecha(plan.fechaCirugia)}',
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(color: AppTheme.subtitleColor,
+                      fontSize: 10.8)),
+            ],
+          )),
+          const SizedBox(width: 8),
+          _buildEstadoBadge(_estadosPlan[plan.id]),
+        ]),
+      ),
+    );
+  }
+
+  Widget _buildPreviewPanel(Color dark, PlanificacionLocal? plan) {
+    if (plan == null) {
+      return _desktopSurface(
+        child: Center(child: Text('Selecciona un caso',
+            style: TextStyle(color: AppTheme.subtitleColor))),
+      );
+    }
+    final acent = _colorVisor(plan.tipoVisor);
+    return _desktopSurface(
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Row(children: [
+          Container(
+            width: 48, height: 48,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(14),
+              color: acent.withOpacity(0.12),
+              border: Border.all(color: acent.withOpacity(0.24)),
+            ),
+            child: Center(child: Text(plan.zonaIcono,
+                style: const TextStyle(fontSize: 22))),
+          ),
+          const SizedBox(width: 12),
+          Expanded(child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(plan.nombrePaciente,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(color: dark, fontSize: 20,
+                      fontWeight: FontWeight.w900)),
+              const SizedBox(height: 3),
+              Text('${plan.zonaLabel} · ${plan.visorLabel}',
+                  style: TextStyle(color: AppTheme.subtitleColor,
+                      fontSize: 12)),
+            ],
+          )),
+          _buildEstadoBadge(_estadosPlan[plan.id]),
+        ]),
+        const SizedBox(height: 18),
+        Expanded(flex: 5, child: _buildMiniPreview(plan)),
+        const SizedBox(height: 14),
+        _detailRow(Icons.calendar_today_outlined, 'Fecha cirugía',
+            _fecha(plan.fechaCirugia)),
+        _detailRow(Icons.category_outlined, 'Tipo', plan.visorLabel),
+        _detailRow(Icons.image_outlined, 'Radiografía',
+            plan.fotoPath == null ? 'Sin imagen adjunta' : 'Imagen adjunta'),
+        const SizedBox(height: 14),
+        Row(children: [
+          Expanded(
+            child: ElevatedButton.icon(
+              onPressed: () => _abrirPlan(plan),
+              icon: const Icon(Icons.open_in_new_rounded, size: 18),
+              label: const Text('Abrir caso'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: acent,
+                foregroundColor: Colors.white,
+                minimumSize: const Size.fromHeight(44),
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          OutlinedButton.icon(
+            onPressed: () => _confirmarEliminar(plan),
+            icon: const Icon(Icons.delete_outline_rounded, size: 18),
+            label: const Text('Eliminar'),
+          ),
+        ]),
+      ]),
+    );
+  }
+
+  Widget _buildMiniPreview(PlanificacionLocal plan) {
+    final acent = _colorVisor(plan.tipoVisor);
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(14),
+      child: GestureDetector(
+        onPanUpdate: (d) {
+          setState(() {
+            _previewRotY += d.delta.dx * 0.01;
+            _previewRotX -= d.delta.dy * 0.01;
+            _previewRotX = _previewRotX.clamp(-1.1, 1.1).toDouble();
+          });
+        },
+        child: Container(
+          decoration: BoxDecoration(
+            color: AppTheme.cardBg2,
+            border: Border.all(color: AppTheme.cardBorder),
+          ),
+          child: Stack(children: [
+            Positioned.fill(
+              child: CustomPaint(
+                painter: _MiniPreviewPainter(
+                  color: acent,
+                  rotX: _previewRotX,
+                  rotY: _previewRotY,
+                  zoom: _previewZoom,
+                  pan: _previewPan,
+                ),
+              ),
+            ),
+            Positioned(
+              left: 12, top: 10,
+              child: Text('Preview 3D',
+                  style: TextStyle(color: AppTheme.subtitleColor,
+                      fontSize: 11, fontWeight: FontWeight.w800)),
+            ),
+            Positioned(
+              right: 10, bottom: 10,
+              child: Row(children: [
+                _miniTool(Icons.remove_rounded, () {
+                  setState(() => _previewZoom =
+                      (_previewZoom - 0.08).clamp(0.72, 1.45).toDouble());
+                }),
+                const SizedBox(width: 6),
+                _miniTool(Icons.center_focus_strong_rounded, () {
+                  setState(() {
+                    _previewRotX = -0.18;
+                    _previewRotY = 0.35;
+                    _previewZoom = 1.0;
+                    _previewPan = Offset.zero;
+                  });
+                }),
+                const SizedBox(width: 6),
+                _miniTool(Icons.add_rounded, () {
+                  setState(() => _previewZoom =
+                      (_previewZoom + 0.08).clamp(0.72, 1.45).toDouble());
+                }),
+              ]),
+            ),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  Widget _miniTool(IconData icon, VoidCallback onTap) {
+    return Material(
+      color: AppTheme.lockedCardBg,
+      borderRadius: BorderRadius.circular(9),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(9),
+        onTap: onTap,
+        child: SizedBox(width: 30, height: 30,
+            child: Icon(icon, size: 16, color: AppTheme.darkText)),
+      ),
+    );
+  }
+
+  Widget _detailRow(IconData icon, String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(children: [
+        Icon(icon, size: 16, color: AppTheme.subtitleColor),
+        const SizedBox(width: 9),
+        SizedBox(width: 92, child: Text(label,
+            style: TextStyle(color: AppTheme.subtitleColor, fontSize: 11.5))),
+        Expanded(child: Text(value,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(color: AppTheme.darkText, fontSize: 12.5,
+                fontWeight: FontWeight.w700))),
+      ]),
+    );
+  }
+
+  Widget _desktopSurface({required Widget child, EdgeInsets? padding}) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(18),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+        child: Container(
+          padding: padding ?? const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: AppTheme.cardBg1,
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: AppTheme.cardBorder, width: 1.2),
+          ),
+          child: child,
+        ),
+      ),
+    );
+  }
+
+  String _fecha(DateTime fecha) =>
+      '${fecha.day.toString().padLeft(2, '0')}/'
+      '${fecha.month.toString().padLeft(2, '0')}/'
+      '${fecha.year}';
 
   Widget _buildCard(PlanificacionLocal plan) {
     final acent  = _colorVisor(plan.tipoVisor);
@@ -564,4 +936,107 @@ class _DotGridPainter extends CustomPainter {
   }
   @override
   bool shouldRepaint(_DotGridPainter o) => o.color != color;
+}
+
+class _MiniPreviewPainter extends CustomPainter {
+  final Color color;
+  final double rotX;
+  final double rotY;
+  final double zoom;
+  final Offset pan;
+
+  _MiniPreviewPainter({
+    required this.color,
+    required this.rotX,
+    required this.rotY,
+    required this.zoom,
+    required this.pan,
+  });
+
+  Offset _project(double x, double y, double z, Size size) {
+    final cosY = math.cos(rotY);
+    final sinY = math.sin(rotY);
+    final cosX = math.cos(rotX);
+    final sinX = math.sin(rotX);
+
+    final x1 = x * cosY + z * sinY;
+    final z1 = -x * sinY + z * cosY;
+    final y1 = y * cosX - z1 * sinX;
+    final z2 = y * sinX + z1 * cosX;
+    final perspective = 280 / (280 + z2);
+    final scale = math.min(size.width, size.height) / 190 * zoom * perspective;
+    return Offset(
+      size.width / 2 + pan.dx + x1 * scale,
+      size.height / 2 + pan.dy - y1 * scale,
+    );
+  }
+
+  void _bone(Canvas canvas, Size size, List<List<double>> pts, Paint paint) {
+    final path = Path();
+    for (int i = 0; i < pts.length; i++) {
+      final p = _project(pts[i][0], pts[i][1], pts[i][2], size);
+      if (i == 0) {
+        path.moveTo(p.dx, p.dy);
+      } else {
+        path.lineTo(p.dx, p.dy);
+      }
+    }
+    canvas.drawPath(path, paint);
+  }
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final grid = Paint()
+      ..color = color.withOpacity(0.05)
+      ..strokeWidth = 1;
+    for (double x = 18; x < size.width; x += 28) {
+      canvas.drawLine(Offset(x, 0), Offset(x, size.height), grid);
+    }
+    for (double y = 18; y < size.height; y += 28) {
+      canvas.drawLine(Offset(0, y), Offset(size.width, y), grid);
+    }
+
+    final shadow = Paint()
+      ..color = Colors.black.withOpacity(0.12)
+      ..strokeWidth = 18 * zoom
+      ..strokeCap = StrokeCap.round
+      ..style = PaintingStyle.stroke;
+    final bone = Paint()
+      ..color = color.withOpacity(0.72)
+      ..strokeWidth = 13 * zoom
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round
+      ..style = PaintingStyle.stroke;
+    final highlight = Paint()
+      ..color = Colors.white.withOpacity(0.55)
+      ..strokeWidth = 4 * zoom
+      ..strokeCap = StrokeCap.round
+      ..style = PaintingStyle.stroke;
+
+    final shapes = <List<List<double>>>[
+      [[-24, 72, 0], [-20, 28, 2], [-16, -15, 4]],
+      [[18, 70, -2], [20, 24, 0], [24, -18, 2]],
+      [[-18, -18, 3], [4, -34, 5], [30, -38, 7]],
+      [[4, -36, 2], [-18, -55, -1], [-48, -64, -6]],
+      [[20, -38, 6], [42, -52, 8], [62, -60, 6]],
+    ];
+
+    for (final s in shapes) {
+      _bone(canvas, size, s, shadow);
+    }
+    for (final s in shapes) {
+      _bone(canvas, size, s, bone);
+    }
+    for (final s in shapes) {
+      _bone(canvas, size, s, highlight);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _MiniPreviewPainter oldDelegate) =>
+      oldDelegate.color != color ||
+      oldDelegate.rotX != rotX ||
+      oldDelegate.rotY != rotY ||
+      oldDelegate.zoom != zoom ||
+      oldDelegate.pan != pan;
 }
