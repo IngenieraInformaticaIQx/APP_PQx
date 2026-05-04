@@ -1,7 +1,10 @@
+import 'package:flutter/foundation.dart'
+    show TargetPlatform, defaultTargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:untitled/services/app_theme.dart';
+import 'package:untitled/widgets/menu_visor_3d.dart';
 import 'login_screen.dart';
 import 'casos_screen.dart';
 import 'visor_selector_screen.dart';
@@ -13,6 +16,20 @@ import 'visor_caso_screen.dart';
 import 'listados_screen.dart';
 import 'nuevo_caso_screen.dart';
 import 'onboarding_screen.dart';
+
+bool get _esPlataformaEscritorio {
+  if (kIsWeb) return true;
+  switch (defaultTargetPlatform) {
+    case TargetPlatform.windows:
+    case TargetPlatform.macOS:
+    case TargetPlatform.linux:
+      return true;
+    case TargetPlatform.android:
+    case TargetPlatform.iOS:
+    case TargetPlatform.fuchsia:
+      return false;
+  }
+}
 
 class MenuScreen extends StatefulWidget {
   const MenuScreen({super.key});
@@ -35,6 +52,7 @@ class _MenuScreenState extends State<MenuScreen>
   final List<Animation<Offset>>   _cardSlides      = [];
 
   String _userEmail = '';
+  int _desktopSelectedIndex = 0;
 
   // ── Último caso ───────────────────────────────────────────────────────────
   String? _ultimoCasoNombre;
@@ -501,7 +519,9 @@ class _MenuScreenState extends State<MenuScreen>
 
             // ── Cards ────────────────────────────────────────────────────────
             Expanded(
-              child: ListView(
+              child: (_esPlataformaEscritorio && size.width >= 860)
+                  ? _buildDesktopHome(size, _dark)
+                  : ListView(
                 padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
                 children: [
                   // Cards del menú
@@ -552,6 +572,365 @@ class _MenuScreenState extends State<MenuScreen>
   }
 
   // ── Card ─────────────────────────────────────────────────────────────────
+  Widget _buildDesktopHome(Size size, Color dark) {
+    final item = _items[_desktopSelectedIndex];
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        SizedBox(
+          width: 360,
+          child: _desktopSurface(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              Text('Navegación',
+                  style: TextStyle(color: dark, fontSize: 18,
+                      fontWeight: FontWeight.w900)),
+              const SizedBox(height: 12),
+              for (int i = 0; i < _items.length; i++) ...[
+                _buildDesktopModuleTile(_items[i], i,
+                    selected: i == _desktopSelectedIndex),
+                const SizedBox(height: 8),
+              ],
+              const Spacer(),
+              _desktopInfoRow(Icons.person_outline_rounded,
+                  _userEmail.isEmpty ? 'Sesión activa' : _userEmail),
+              const SizedBox(height: 8),
+              OutlinedButton.icon(
+                onPressed: _mostrarPerfil,
+                icon: const Icon(Icons.settings_outlined, size: 17),
+                label: const Text('Perfil y ajustes'),
+              ),
+            ]),
+          ),
+        ),
+        const SizedBox(width: 16),
+        Expanded(
+          child: _desktopSurface(
+            padding: EdgeInsets.zero,
+            child: _buildDesktopModulePreview(item, _desktopSelectedIndex),
+          ),
+        ),
+        const SizedBox(width: 16),
+        SizedBox(width: 400, child: _buildDesktopRightPanel(dark)),
+      ]),
+    );
+  }
+
+  Widget _buildDesktopModuleTile(_MenuItem item, int index,
+      {required bool selected}) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: () => setState(() => _desktopSelectedIndex = index),
+        onDoubleTap: () => _onTap(index),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 160),
+          height: 84,
+          decoration: BoxDecoration(
+            color: selected ? item.colorA.withOpacity(0.13) : AppTheme.cardBg2,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: selected
+                  ? item.colorA.withOpacity(0.45)
+                  : AppTheme.cardBorder,
+              width: selected ? 1.5 : 1,
+            ),
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(13),
+            child: Stack(children: [
+              // Imagen de fondo difuminada hacia la izquierda (como en móvil)
+              if (item.imagenAsset != null)
+                Positioned(
+                  right: 0, top: 0, bottom: 0, width: 160,
+                  child: ShaderMask(
+                    shaderCallback: (rect) => LinearGradient(
+                      begin: Alignment.centerLeft,
+                      end: Alignment.centerRight,
+                      colors: [
+                        Colors.transparent,
+                        Colors.white.withOpacity(selected ? 0.55 : 0.30),
+                        Colors.white.withOpacity(selected ? 0.75 : 0.45),
+                      ],
+                      stops: const [0.0, 0.45, 1.0],
+                    ).createShader(rect),
+                    blendMode: BlendMode.dstIn,
+                    child: Image.asset(item.imagenAsset!, fit: BoxFit.cover),
+                  ),
+                ),
+
+              // Contenido (icono + texto) por encima de la imagen
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 14),
+                child: Row(children: [
+                  Container(
+                    width: 46, height: 46,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(13),
+                      color: item.colorA.withOpacity(0.14),
+                    ),
+                    child: Icon(item.icon, color: item.colorA, size: 24),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(item.title,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(color: AppTheme.darkText,
+                              fontSize: 14.5, fontWeight: FontWeight.w900,
+                              letterSpacing: -0.2)),
+                      const SizedBox(height: 3),
+                      Text(item.tag,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(color: AppTheme.subtitleColor,
+                              fontSize: 11, fontWeight: FontWeight.w700,
+                              letterSpacing: 0.4)),
+                    ],
+                  )),
+                ]),
+              ),
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDesktopModulePreview(_MenuItem item, int index) {
+    return Stack(children: [
+      // ── Visor 3D fijo (mismo para todos los módulos) ──────────────────────
+      const Positioned.fill(child: MenuVisor3D()),
+
+      // ── Chip flotante con el módulo seleccionado (arriba izq) ─────────────
+      Positioned(
+        top: 18, left: 18,
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(999),
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+              decoration: BoxDecoration(
+                color: item.colorA.withOpacity(0.18),
+                borderRadius: BorderRadius.circular(999),
+                border: Border.all(color: Colors.white.withOpacity(0.28)),
+              ),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                Container(width: 6, height: 6,
+                  decoration: BoxDecoration(
+                    color: item.colorA, shape: BoxShape.circle,
+                    boxShadow: [BoxShadow(color: item.colorA.withOpacity(0.6),
+                        blurRadius: 6)],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Text(item.tag,
+                    style: const TextStyle(color: Colors.white, fontSize: 10.5,
+                        fontWeight: FontWeight.w900, letterSpacing: 1.3)),
+              ]),
+            ),
+          ),
+        ),
+      ),
+
+      // ── Hint de interacción (arriba derecha) ──────────────────────────────
+      Positioned(
+        top: 18, right: 18,
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(999),
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+              decoration: BoxDecoration(
+                color: Colors.black.withOpacity(0.28),
+                borderRadius: BorderRadius.circular(999),
+                border: Border.all(color: Colors.white.withOpacity(0.18)),
+              ),
+              child: const Row(mainAxisSize: MainAxisSize.min, children: [
+                Icon(Icons.threed_rotation_rounded, size: 14, color: Colors.white70),
+                SizedBox(width: 6),
+                Text('Arrastra para mover - rueda para zoom',
+                    style: TextStyle(color: Colors.white70, fontSize: 10.5,
+                        fontWeight: FontWeight.w600)),
+              ]),
+            ),
+          ),
+        ),
+      ),
+
+      // ── Título + botón "Abrir" (abajo) ────────────────────────────────────
+      Positioned(
+        left: 22, right: 22, bottom: 22,
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(18),
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+            child: Container(
+              padding: const EdgeInsets.fromLTRB(18, 14, 14, 14),
+              decoration: BoxDecoration(
+                color: Colors.black.withOpacity(0.35),
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(color: Colors.white.withOpacity(0.18)),
+              ),
+              child: Row(children: [
+                Expanded(
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min, children: [
+                    Text(item.title,
+                        maxLines: 1, overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(color: Colors.white, fontSize: 22,
+                            fontWeight: FontWeight.w900, letterSpacing: -0.3)),
+                    const SizedBox(height: 2),
+                    Text(item.subtitle,
+                        maxLines: 1, overflow: TextOverflow.ellipsis,
+                        style: TextStyle(color: Colors.white.withOpacity(0.72),
+                            fontSize: 12.5, height: 1.3)),
+                  ]),
+                ),
+                const SizedBox(width: 12),
+                ElevatedButton.icon(
+                  onPressed: () => _onTap(index),
+                  icon: const Icon(Icons.arrow_forward_rounded, size: 18),
+                  label: const Text('Abrir'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: item.colorA,
+                    foregroundColor: Colors.white,
+                    minimumSize: const Size(120, 44),
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                ),
+              ]),
+            ),
+          ),
+        ),
+      ),
+    ]);
+  }
+
+  Widget _buildDesktopRightPanel(Color dark) {
+    return _desktopSurface(
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Text('Actividad',
+            style: TextStyle(color: dark, fontSize: 18,
+                fontWeight: FontWeight.w900)),
+        const SizedBox(height: 14),
+        if (_ultimoCasoNombre != null)
+          _buildDesktopRecentCase()
+        else
+          _buildDesktopNoRecentCase(),
+        const Spacer(),
+        _buildSliderFrases(),
+      ]),
+    );
+  }
+
+  Widget _buildDesktopRecentCase() {
+    final color = _estadoColor(_ultimoCasoEstado ?? '');
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: () {
+          if (_ultimoCaso != null) {
+            Navigator.push(context,
+                MaterialPageRoute(builder: (_) =>
+                    VisorCasoScreen(caso: _ultimoCaso!, autoCargar: true)))
+                .then((_) => _loadUltimoCaso());
+          } else {
+            _onTap(2);
+          }
+        },
+        child: Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: color.withOpacity(0.09),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: color.withOpacity(0.25)),
+          ),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              Icon(Icons.history_rounded, color: color, size: 20),
+              const SizedBox(width: 8),
+              Text('Último caso',
+                  style: TextStyle(color: AppTheme.subtitleColor,
+                      fontSize: 11.5, fontWeight: FontWeight.w800)),
+            ]),
+            const SizedBox(height: 10),
+            Text(_ultimoCasoNombre ?? '',
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: AppTheme.darkText, fontSize: 15,
+                    fontWeight: FontWeight.w900)),
+            const SizedBox(height: 8),
+            Text(_ultimoCasoEstado ?? 'pendiente',
+                style: TextStyle(color: color, fontSize: 11.5,
+                    fontWeight: FontWeight.w800)),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDesktopNoRecentCase() {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppTheme.cardBg2,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppTheme.cardBorder),
+      ),
+      child: Row(children: [
+        Icon(Icons.inbox_outlined, color: AppTheme.subtitleColor, size: 20),
+        const SizedBox(width: 10),
+        Expanded(child: Text('Sin caso reciente',
+            style: TextStyle(color: AppTheme.subtitleColor,
+                fontSize: 12.5, fontWeight: FontWeight.w700))),
+      ]),
+    );
+  }
+
+  Widget _desktopInfoRow(IconData icon, String text) {
+    return Container(
+      padding: const EdgeInsets.all(11),
+      decoration: BoxDecoration(
+        color: AppTheme.cardBg2,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppTheme.cardBorder),
+      ),
+      child: Row(children: [
+        Icon(icon, size: 17, color: AppTheme.subtitleColor),
+        const SizedBox(width: 9),
+        Expanded(child: Text(text,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(color: AppTheme.subtitleColor, fontSize: 11.5))),
+      ]),
+    );
+  }
+
+  Widget _desktopSurface({required Widget child, EdgeInsets? padding}) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(20),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+        child: Container(
+          padding: padding ?? const EdgeInsets.all(18),
+          decoration: BoxDecoration(
+            color: AppTheme.cardBg1,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: AppTheme.cardBorder, width: 1.2),
+          ),
+          child: child,
+        ),
+      ),
+    );
+  }
+
   Widget _buildCard(_MenuItem item, int index, Size size) {
     return GestureDetector(
       onTap: () => _onTap(index),
