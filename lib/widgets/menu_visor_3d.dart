@@ -1,6 +1,7 @@
-import 'dart:math' as math;
-
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:webview_flutter/webview_flutter.dart';
 import 'package:untitled/services/app_theme.dart';
 
 class MenuVisor3D extends StatefulWidget {
@@ -10,193 +11,170 @@ class MenuVisor3D extends StatefulWidget {
   State<MenuVisor3D> createState() => _MenuVisor3DState();
 }
 
-class _MenuVisor3DState extends State<MenuVisor3D>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _controller;
+class _MenuVisor3DState extends State<MenuVisor3D> {
+  WebViewController? _wc;
 
   @override
   void initState() {
     super.initState();
-    _controller = AnimationController(
-      vsync: this,
-      duration: const Duration(seconds: 8),
-    )..repeat();
+    _init();
   }
 
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
+  Future<void> _init() async {
+    final glbs = <String, String>{};
+    for (final name in ['Tibia', 'Perone', 'Astragalo', 'Calcaneo']) {
+      final data = await rootBundle.load('assets/RX/$name.glb');
+      glbs[name] = base64Encode(data.buffer.asUint8List());
+    }
+    if (!mounted) return;
+    final c = WebViewController()
+      ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..setBackgroundColor(Colors.transparent)
+      ..loadHtmlString(_buildHtml(glbs, AppTheme.isDark.value));
+    setState(() => _wc = c);
   }
 
   @override
   Widget build(BuildContext context) {
-    return InteractiveViewer(
-      minScale: 0.8,
-      maxScale: 2.8,
-      boundaryMargin: const EdgeInsets.all(260),
-      child: AnimatedBuilder(
-        animation: _controller,
-        builder: (context, _) {
-          return CustomPaint(
-            painter: _MenuVisor3DPainter(
-              phase: _controller.value,
-              dark: AppTheme.isDark.value,
-            ),
-            child: const SizedBox.expand(),
-          );
-        },
-      ),
-    );
+    if (_wc == null) {
+      return Container(
+        color: AppTheme.isDark.value
+            ? const Color(0xFF0B1426)
+            : const Color(0xFFF4F7FB),
+        child: const Center(child: CircularProgressIndicator(strokeWidth: 2)),
+      );
+    }
+    return WebViewWidget(controller: _wc!);
   }
+
+  static String _buildHtml(Map<String, String> glbs, bool dark) {
+    final bg1 = dark ? '#0B1426' : '#F4F7FB';
+    final bg2 = dark ? '#17223B' : '#E2EAF5';
+    final accentCss = dark ? '#7EC8FF' : '#2A7FF5';
+
+    final glbJsSb = StringBuffer('{');
+    var first = true;
+    for (final e in glbs.entries) {
+      if (!first) glbJsSb.write(',');
+      glbJsSb.write('"${e.key}":"${e.value}"');
+      first = false;
+    }
+    glbJsSb.write('}');
+
+    return '''<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+html,body{width:100%;height:100%;overflow:hidden;background:linear-gradient(135deg,$bg1,$bg2);}
+canvas{display:block;width:100%!important;height:100%!important;}
+#loader{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  color:$accentCss;font-family:system-ui,sans-serif;font-size:12px;letter-spacing:1px;opacity:.7;}
+</style>
+</head>
+<body>
+<div id="loader">Cargando modelos…</div>
+<script type="importmap">
+{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader }    from 'three/addons/loaders/GLTFLoader.js';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+const dark = ${dark ? 'true' : 'false'};
+
+const renderer = new THREE.WebGLRenderer({antialias:true, alpha:true});
+renderer.setPixelRatio(devicePixelRatio);
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(38, innerWidth/innerHeight, 0.1, 10000);
+
+scene.add(new THREE.AmbientLight(0xffffff, dark ? 0.6 : 0.9));
+const key = new THREE.DirectionalLight(0xffffff, dark ? 1.4 : 1.2);
+key.position.set(200, 400, 300);
+key.castShadow = true;
+scene.add(key);
+const fill = new THREE.DirectionalLight(dark ? 0x8ab4f8 : 0xd0e4ff, 0.45);
+fill.position.set(-200, -100, -200);
+scene.add(fill);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.07;
+controls.autoRotate = true;
+controls.autoRotateSpeed = 0.5;
+
+const boneMat = new THREE.MeshStandardMaterial({
+  color: dark ? 0xc8d5e8 : 0xdde5f0,
+  roughness: 0.48,
+  metalness: 0.08,
+});
+
+const group = new THREE.Group();
+scene.add(group);
+
+function b64ToBuffer(b64) {
+  const bin = atob(b64);
+  const buf = new ArrayBuffer(bin.length);
+  const u8  = new Uint8Array(buf);
+  for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+  return buf;
 }
 
-class _MenuVisor3DPainter extends CustomPainter {
-  final double phase;
-  final bool dark;
+const glbData = $glbJsSb;
+const names   = Object.keys(glbData);
+const loader  = new GLTFLoader();
+let loaded = 0;
 
-  const _MenuVisor3DPainter({required this.phase, required this.dark});
+for (const name of names) {
+  const buf = b64ToBuffer(glbData[name]);
+  loader.parse(buf, '', gltf => {
+    gltf.scene.traverse(n => {
+      if (n.isMesh) {
+        n.material = boneMat.clone();
+        n.castShadow = true;
+        n.receiveShadow = true;
+      }
+    });
+    group.add(gltf.scene);
+    if (++loaded === names.length) _onAllLoaded();
+  }, err => {
+    console.error(name, err);
+    if (++loaded === names.length) _onAllLoaded();
+  });
+}
 
-  @override
-  void paint(Canvas canvas, Size size) {
-    final bg = Paint()
-      ..shader = LinearGradient(
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
-        colors: dark
-            ? const [Color(0xFF0B1426), Color(0xFF17223B)]
-            : const [Color(0xFFF4F7FB), Color(0xFFE2EAF5)],
-      ).createShader(Offset.zero & size);
-    canvas.drawRect(Offset.zero & size, bg);
+function _onAllLoaded() {
+  document.getElementById('loader').style.display = 'none';
+  const box    = new THREE.Box3().setFromObject(group);
+  const center = box.getCenter(new THREE.Vector3());
+  const size   = box.getSize(new THREE.Vector3());
+  group.position.sub(center);
+  const maxDim = Math.max(size.x, size.y, size.z);
+  camera.position.set(maxDim * 0.35, maxDim * 0.15, maxDim * 1.55);
+  controls.target.set(0, 0, 0);
+  controls.update();
+}
 
-    final grid = Paint()
-      ..color = dark
-          ? Colors.white.withOpacity(0.055)
-          : const Color(0xFF2A6FB6).withOpacity(0.10)
-      ..strokeWidth = 1;
-    const step = 34.0;
-    for (double x = -size.height; x < size.width + size.height; x += step) {
-      canvas.drawLine(Offset(x, size.height), Offset(x + size.height, 0), grid);
-    }
-    for (double y = 0; y < size.height + size.width; y += step) {
-      canvas.drawLine(Offset(0, y), Offset(size.width, y - size.width), grid);
-    }
+window.addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
 
-    canvas.save();
-    canvas.translate(size.width / 2, size.height / 2 + 14);
-    final scale =
-        math.min(size.width / 620, size.height / 520).clamp(0.55, 1.35).toDouble();
-    canvas.scale(scale);
-    canvas.rotate(math.sin(phase * math.pi * 2) * 0.035);
-
-    _drawShadow(canvas);
-    _drawBone(
-      canvas,
-      rect: const Rect.fromLTWH(-76, -250, 64, 250),
-      color: const Color(0xFFE9EDF3),
-      side: const Color(0xFFB8C1CF),
-    );
-    _drawBone(
-      canvas,
-      rect: const Rect.fromLTWH(36, -238, 42, 228),
-      color: const Color(0xFFDDE5F0),
-      side: const Color(0xFFAAB5C5),
-    );
-    _drawJoint(canvas, const Offset(-28, 6), 74, 44, const Color(0xFFE4E9F1));
-    _drawJoint(canvas, const Offset(-38, 70), 150, 62, const Color(0xFFD9E0EA));
-    _drawJoint(canvas, const Offset(44, 88), 170, 46, const Color(0xFFE8ECF3));
-    _drawFootFront(canvas);
-
-    canvas.restore();
-  }
-
-  void _drawShadow(Canvas canvas) {
-    final p = Paint()
-      ..color = Colors.black.withOpacity(dark ? 0.28 : 0.14)
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 24);
-    canvas.drawOval(const Rect.fromLTWH(-190, 98, 390, 74), p);
-  }
-
-  void _drawBone(Canvas canvas,
-      {required Rect rect, required Color color, required Color side}) {
-    final path = RRect.fromRectAndRadius(rect, const Radius.circular(28));
-    canvas.drawRRect(
-      path.shift(const Offset(12, 12)),
-      Paint()..color = side.withOpacity(0.78),
-    );
-    canvas.drawRRect(
-      path,
-      Paint()
-        ..shader = LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Colors.white, color, side],
-        ).createShader(rect),
-    );
-    canvas.drawRRect(
-      path.deflate(9),
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 3
-        ..color = Colors.white.withOpacity(0.45),
-    );
-  }
-
-  void _drawJoint(Canvas canvas, Offset center, double width, double height,
-      Color color) {
-    final rect = Rect.fromCenter(center: center, width: width, height: height);
-    canvas.drawOval(
-      rect.shift(const Offset(12, 12)),
-      Paint()..color = const Color(0xFF9CA9BA).withOpacity(0.55),
-    );
-    canvas.drawOval(
-      rect,
-      Paint()
-        ..shader = LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Colors.white, color, const Color(0xFFAEB9C8)],
-        ).createShader(rect),
-    );
-    canvas.drawOval(
-      rect.deflate(8),
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 2.5
-        ..color = Colors.white.withOpacity(0.42),
-    );
-  }
-
-  void _drawFootFront(Canvas canvas) {
-    final paint = Paint()
-      ..shader = const LinearGradient(
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
-        colors: [Color(0xFFF5F7FA), Color(0xFFC9D2DE), Color(0xFF9CA9BA)],
-      ).createShader(const Rect.fromLTWH(-22, 100, 230, 96));
-
-    final foot = Path()
-      ..moveTo(-22, 118)
-      ..cubicTo(20, 84, 104, 92, 178, 126)
-      ..cubicTo(205, 139, 214, 164, 194, 178)
-      ..cubicTo(144, 199, 34, 189, -24, 154)
-      ..cubicTo(-42, 143, -40, 130, -22, 118)
-      ..close();
-    canvas.drawPath(
-      foot.shift(const Offset(12, 12)),
-      Paint()..color = const Color(0xFF9CA9BA).withOpacity(0.54),
-    );
-    canvas.drawPath(foot, paint);
-
-    final toePaint = Paint()..color = Colors.white.withOpacity(0.35);
-    for (var i = 0; i < 5; i++) {
-      final x = 95 + i * 20.0;
-      canvas.drawOval(Rect.fromLTWH(x, 134 + i * 2.5, 28, 18), toePaint);
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant _MenuVisor3DPainter oldDelegate) {
-    return oldDelegate.phase != phase || oldDelegate.dark != dark;
+(function loop() {
+  requestAnimationFrame(loop);
+  controls.update();
+  renderer.render(scene, camera);
+})();
+</script>
+</body>
+</html>''';
   }
 }
