@@ -4,10 +4,11 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:untitled/services/app_theme.dart';
-import 'package:untitled/widgets/menu_visor_3d.dart';
+import 'package:http/http.dart' as http;
 import 'login_screen.dart';
 import 'casos_screen.dart';
 import 'visor_selector_screen.dart';
+import 'varval_submenu_screen.dart';
 import 'dart:ui';
 import 'dart:math' as math;
 import 'dart:async';
@@ -58,6 +59,17 @@ class _MenuScreenState extends State<MenuScreen>
   String? _ultimoCasoNombre;
   String? _ultimoCasoId;
   String? _ultimoCasoEstado;
+
+  // ── Catálogo de implantes (panel central desktop) ─────────────────────────
+  static const _catTipos  = ['Adicion', 'Sustraccion', 'Rotacion'];
+  static const _catLabels = ['Adición', 'Sustracción', 'Rotación'];
+  static const _catZonas  = ['Tibial', 'Femoral'];
+  int    _catTipoIdx  = 0;
+  int    _catZonaIdx  = 0;
+  bool   _catCargando = false;
+  String? _catError;
+  List<Map<String, dynamic>> _catPlacas    = [];
+  List<Map<String, dynamic>> _catTornillos = [];
 
   // ── Slider de frases ──────────────────────────────────────────────────────
   static const int _fraseOffset = 10000;
@@ -110,7 +122,7 @@ class _MenuScreenState extends State<MenuScreen>
   // ── Items del menú ────────────────────────────────────────────────────────
   static const List<_MenuItem> _items = [
     _MenuItem(
-      icon: Icons.airline_seat_flat,
+      icon: Icons.view_in_ar_rounded,
       title: 'Catálogo 3D',
       subtitle: 'Explora modelos anatómicos en tres dimensiones',
       colorA: Color(0xFF2A7FF5),
@@ -188,6 +200,7 @@ class _MenuScreenState extends State<MenuScreen>
     _loadUser();
     _loadUltimoCaso();
     _startFraseTimer();
+    _cargarCatalogo();
     WidgetsBinding.instance.addObserver(this);
   }
 
@@ -202,6 +215,121 @@ class _MenuScreenState extends State<MenuScreen>
   }
 
   CasoMedico? _ultimoCaso;
+
+  // ── Catálogo ──────────────────────────────────────────────────────────────
+  Future<void> _cargarCatalogo() async {
+    if (!mounted) return;
+    setState(() { _catCargando = true; _catError = null; });
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final email = prefs.getString('login_email') ?? '';
+      final pass  = prefs.getString('login_password') ?? '';
+      final cred  = base64Encode(utf8.encode('$email:$pass'));
+
+      final tipo = _catTipos[_catTipoIdx];
+      final zona = _catZonas[_catZonaIdx];
+      final uri  = Uri.parse(
+        'https://profesional.planificacionquirurgica.com/listar_varval.php'
+        '?tipo=$tipo&zona=$zona',
+      );
+      final res = await http.get(uri,
+          headers: {'Authorization': 'Basic $cred'})
+          .timeout(const Duration(seconds: 20));
+
+      if (res.statusCode != 200) throw Exception('HTTP ${res.statusCode}');
+      final data = json.decode(res.body) as Map<String, dynamic>;
+      if (data['success'] != true) throw Exception('Respuesta inválida');
+
+      final placas = (data['placas'] as List? ?? []).map((g) {
+        final piezas = (g['placas'] as List? ?? [])
+            .map((e) => {'nombre': e['nombre'] as String,
+                          'url': e['url'] as String,
+                          'archivo': e['archivo'] as String})
+            .toList();
+        return {'grupo': g['nombre'] as String, 'piezas': piezas};
+      }).toList();
+
+      final tornillos = (data['tornillos'] as List? ?? []).map((g) {
+        final piezas = (g['tornillos'] as List? ?? [])
+            .map((e) => {'nombre': e['nombre'] as String,
+                          'url': e['url'] as String,
+                          'archivo': e['archivo'] as String})
+            .toList();
+        return {'grupo': g['nombre'] as String, 'piezas': piezas};
+      }).toList();
+
+      if (!mounted) return;
+      setState(() {
+        _catPlacas    = List<Map<String, dynamic>>.from(placas);
+        _catTornillos = List<Map<String, dynamic>>.from(tornillos);
+        _catCargando  = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() { _catError = e.toString(); _catCargando = false; });
+    }
+  }
+
+  void _abrirCatalogoEnVisor() async {
+    setState(() => _catCargando = true);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final email = prefs.getString('login_email') ?? '';
+      final pass  = prefs.getString('login_password') ?? '';
+      final cred  = base64Encode(utf8.encode('$email:$pass'));
+
+      final tipo = _catTipos[_catTipoIdx];
+      final zona = _catZonas[_catZonaIdx];
+      final uri  = Uri.parse(
+        'https://profesional.planificacionquirurgica.com/listar_varval.php'
+        '?tipo=$tipo&zona=$zona',
+      );
+      final res = await http.get(uri,
+          headers: {'Authorization': 'Basic $cred'})
+          .timeout(const Duration(seconds: 20));
+
+      final data = json.decode(res.body) as Map<String, dynamic>;
+      if (data['success'] != true) throw Exception('Sin datos');
+
+      final biomodelos = (data['biomodelos'] as List? ?? [])
+          .map((e) => GlbArchivo(nombre: e['nombre'], archivo: e['archivo'],
+                url: e['url'], tipo: 'biomodelo')).toList();
+      final placas = (data['placas'] as List? ?? [])
+          .map((g) => GrupoPlagas(
+            nombre: g['nombre'],
+            placas: (g['placas'] as List)
+                .map((e) => GlbArchivo(nombre: e['nombre'],
+                      archivo: e['archivo'], url: e['url'], tipo: 'placa'))
+                .toList()))
+          .toList();
+      final tornillos = (data['tornillos'] as List? ?? [])
+          .map((g) => GrupoTornillos(
+            nombre: g['nombre'],
+            tornillos: (g['tornillos'] as List)
+                .map((e) => GlbArchivo(nombre: e['nombre'],
+                      archivo: e['archivo'], url: e['url'], tipo: 'tornillo'))
+                .toList()))
+          .toList();
+
+      if (!mounted) return;
+      final label = '${_catLabels[_catTipoIdx]} · ${_catZonas[_catZonaIdx]}';
+      Navigator.push(context, MaterialPageRoute(
+        builder: (_) => VisorCasoScreen(
+          caso: CasoMedico(id: '${tipo}_$zona', nombre: label,
+              paciente: '', fechaOp: '', estado: 'generico',
+              biomodelos: biomodelos, placas: placas, tornillos: tornillos),
+          autoCargar: true, modoGenerico: true,
+        ),
+      ));
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'),
+              backgroundColor: Colors.red.shade700));
+    } finally {
+      if (mounted) setState(() => _catCargando = false);
+    }
+  }
 
   Future<void> _loadUltimoCaso() async {
     final prefs   = await SharedPreferences.getInstance();
@@ -573,7 +701,6 @@ class _MenuScreenState extends State<MenuScreen>
 
   // ── Card ─────────────────────────────────────────────────────────────────
   Widget _buildDesktopHome(Size size, Color dark) {
-    final item = _items[_desktopSelectedIndex];
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
       child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
@@ -605,8 +732,7 @@ class _MenuScreenState extends State<MenuScreen>
         const SizedBox(width: 16),
         Expanded(
           child: _desktopSurface(
-            padding: EdgeInsets.zero,
-            child: _buildDesktopModulePreview(item, _desktopSelectedIndex),
+            child: _buildDesktopCatalogPanel(),
           ),
         ),
         const SizedBox(width: 16),
@@ -698,10 +824,228 @@ class _MenuScreenState extends State<MenuScreen>
     );
   }
 
+  // ── Panel central: catálogo de implantes ─────────────────────────────────
+  Widget _buildDesktopCatalogPanel() {
+    final totalPiezas = _catPlacas.fold<int>(0, (s, g) =>
+            s + (g['piezas'] as List).length) +
+        _catTornillos.fold<int>(0, (s, g) =>
+            s + (g['piezas'] as List).length);
+
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+
+      // ── Cabecera ──────────────────────────────────────────────────────────
+      Row(children: [
+        Icon(Icons.inventory_2_outlined, color: _accent, size: 20),
+        const SizedBox(width: 8),
+        Expanded(child: Text('Catálogo de implantes',
+            style: TextStyle(color: AppTheme.darkText, fontSize: 17,
+                fontWeight: FontWeight.w900))),
+        if (!_catCargando && totalPiezas > 0)
+          Text('$totalPiezas piezas',
+              style: TextStyle(color: AppTheme.subtitleColor,
+                  fontSize: 11.5, fontWeight: FontWeight.w600)),
+      ]),
+      const SizedBox(height: 12),
+
+      // ── Selector de técnica ───────────────────────────────────────────────
+      SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(children: List.generate(_catTipos.length, (i) {
+          final sel = i == _catTipoIdx;
+          return Padding(
+            padding: const EdgeInsets.only(right: 6),
+            child: GestureDetector(
+              onTap: () { setState(() { _catTipoIdx = i; }); _cargarCatalogo(); },
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 160),
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+                decoration: BoxDecoration(
+                  color: sel ? _accent : AppTheme.cardBg2,
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                      color: sel ? _accent : AppTheme.cardBorder, width: 1.2),
+                ),
+                child: Text(_catLabels[i],
+                    style: TextStyle(
+                        color: sel ? Colors.white : AppTheme.subtitleColor,
+                        fontSize: 12, fontWeight: FontWeight.w700)),
+              ),
+            ),
+          );
+        })),
+      ),
+      const SizedBox(height: 8),
+
+      // ── Selector de zona ──────────────────────────────────────────────────
+      Row(children: List.generate(_catZonas.length, (i) {
+        final sel = i == _catZonaIdx;
+        return Padding(
+          padding: const EdgeInsets.only(right: 6),
+          child: GestureDetector(
+            onTap: () { setState(() { _catZonaIdx = i; }); _cargarCatalogo(); },
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 160),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+              decoration: BoxDecoration(
+                color: sel
+                    ? AppTheme.darkText.withOpacity(0.10)
+                    : Colors.transparent,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                    color: sel
+                        ? AppTheme.darkText.withOpacity(0.25)
+                        : AppTheme.cardBorder),
+              ),
+              child: Text(_catZonas[i],
+                  style: TextStyle(
+                      color: sel ? AppTheme.darkText : AppTheme.subtitleColor,
+                      fontSize: 11.5, fontWeight: FontWeight.w700)),
+            ),
+          ),
+        );
+      })),
+      const SizedBox(height: 10),
+
+      // ── Lista de piezas ───────────────────────────────────────────────────
+      Expanded(child: _catCargando
+          ? const Center(child: CircularProgressIndicator(strokeWidth: 2))
+          : _catError != null
+              ? Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  Icon(Icons.wifi_off_rounded,
+                      color: AppTheme.subtitleColor, size: 32),
+                  const SizedBox(height: 8),
+                  Text('Sin conexión',
+                      style: TextStyle(color: AppTheme.subtitleColor,
+                          fontSize: 13, fontWeight: FontWeight.w600)),
+                ]))
+              : ListView(children: [
+                  if (_catPlacas.isNotEmpty) ...[
+                    _catGroupHeader('Placas', Icons.grid_view_rounded,
+                        const Color(0xFF2A7FF5)),
+                    ..._catPlacas.expand((g) => [
+                      _catSubHeader(g['grupo'] as String),
+                      ...(g['piezas'] as List).map((p) =>
+                          _catPiezaRow(p as Map<String, dynamic>,
+                              const Color(0xFF2A7FF5))),
+                    ]),
+                  ],
+                  if (_catTornillos.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    _catGroupHeader('Tornillos', Icons.settings_outlined,
+                        const Color(0xFF34A853)),
+                    ..._catTornillos.expand((g) => [
+                      _catSubHeader(g['grupo'] as String),
+                      ...(g['piezas'] as List).map((p) =>
+                          _catPiezaRow(p as Map<String, dynamic>,
+                              const Color(0xFF34A853))),
+                    ]),
+                  ],
+                  if (_catPlacas.isEmpty && _catTornillos.isEmpty)
+                    Center(child: Padding(
+                      padding: const EdgeInsets.only(top: 32),
+                      child: Text('Sin piezas para esta combinación',
+                          style: TextStyle(color: AppTheme.subtitleColor,
+                              fontSize: 13)),
+                    )),
+                  const SizedBox(height: 8),
+                ]),
+      ),
+
+      // ── Botón Ver en 3D ───────────────────────────────────────────────────
+      const SizedBox(height: 10),
+      ElevatedButton.icon(
+        onPressed: _catCargando ? null : _abrirCatalogoEnVisor,
+        icon: const Icon(Icons.view_in_ar_rounded, size: 18),
+        label: Text(
+          'Ver ${_catLabels[_catTipoIdx]} · ${_catZonas[_catZonaIdx]} en 3D'),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: _accent,
+          foregroundColor: Colors.white,
+          minimumSize: const Size.fromHeight(44),
+          elevation: 0,
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12)),
+        ),
+      ),
+    ]);
+  }
+
+  Widget _catGroupHeader(String label, IconData icon, Color color) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Row(children: [
+        Icon(icon, color: color, size: 14),
+        const SizedBox(width: 6),
+        Text(label.toUpperCase(),
+            style: TextStyle(color: color, fontSize: 10,
+                fontWeight: FontWeight.w900, letterSpacing: 1.2)),
+      ]),
+    );
+  }
+
+  Widget _catSubHeader(String label) {
+    if (label.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(0, 4, 0, 2),
+      child: Text(label,
+          style: TextStyle(color: AppTheme.subtitleColor, fontSize: 11,
+              fontWeight: FontWeight.w700)),
+    );
+  }
+
+  Widget _catPiezaRow(Map<String, dynamic> pieza, Color color) {
+    final nombre = pieza['nombre'] as String? ?? '';
+    return Container(
+      margin: const EdgeInsets.only(bottom: 3),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: AppTheme.cardBg2,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: AppTheme.cardBorder),
+      ),
+      child: Row(children: [
+        Container(width: 6, height: 6,
+            decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
+        const SizedBox(width: 8),
+        Expanded(child: Text(nombre,
+            style: TextStyle(color: AppTheme.darkText, fontSize: 12,
+                fontWeight: FontWeight.w600))),
+      ]),
+    );
+  }
+
   Widget _buildDesktopModulePreview(_MenuItem item, int index) {
     return Stack(children: [
-      // ── Visor 3D fijo (mismo para todos los módulos) ──────────────────────
-      const Positioned.fill(child: MenuVisor3D()),
+      // ── Imagen real del módulo seleccionado ───────────────────────────────
+      Positioned.fill(
+        child: item.imagenAsset != null
+            ? Image.asset(item.imagenAsset!, fit: BoxFit.cover)
+            : DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [item.colorA, item.colorB],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                ),
+              ),
+      ),
+
+      Positioned.fill(
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: [
+                Colors.black.withOpacity(0.10),
+                Colors.black.withOpacity(0.28),
+                Colors.black.withOpacity(0.55),
+              ],
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+            ),
+          ),
+        ),
+      ),
 
       // ── Chip flotante con el módulo seleccionado (arriba izq) ─────────────
       Positioned(

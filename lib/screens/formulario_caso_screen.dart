@@ -46,6 +46,7 @@ class FormularioCasoScreen extends StatelessWidget {
       fechaCirugia:    DateTime.now(),
       zonaImplanteId:  'tobillo',
       tipoVisor:       tipoVisor,
+
       fotoPath:        fotoPath,
       fotoLateralPath: fotoLateralPath,
       fechaCreacion:   DateTime.now(),
@@ -63,116 +64,53 @@ class MedicionManualMilimetricaScreen extends StatefulWidget {
       _MedicionManualMilimetricaScreenState();
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+//  Constantes de referencias físicas
+// ─────────────────────────────────────────────────────────────────────────────
+const Map<String, double> _kRefMm = {
+  'bola_1':         9.98,
+  'barra_longitud': 96.30,
+  'barra_diametro': 7.98,
+};
+const Map<String, String> _kMedFrontal = {
+  'tibia_anchura_mm':    'Tibia anchura',
+  'perone_anchura_mm':   'Peroné anchura',
+  'astragalo_anchura_mm':'Astrágalo anchura',
+};
+const Map<String, String> _kMedLateral = {
+  'astragalo_altura_mm':  'Astrágalo altura',
+  'calcaneo_longitud_mm': 'Calcáneo longitud',
+  'calcaneo_altura_mm':   'Calcáneo altura',
+};
+
 class _MedicionManualMilimetricaScreenState
     extends State<MedicionManualMilimetricaScreen> {
-  static const Color _purple  = Color(0xFF8E44AD);
-  static const Color _purpleL = Color(0xFFCE93D8);
-  static const double _bolaMm = 9.98;
-  static const double _barraLongMm = 96.30;
-  static const double _barraDiamMm = 7.98;
+  static const Color _kAccent = Color(0xFF2A7FF5);
+  static const Color _kRef    = Color(0xFFE8840A);
+  static const Color _kMed    = Color(0xFF8E44AD);
+
+  int _tab = 0; // 0 = frontal, 1 = lateral
+  bool _mismaMagnificacion = true;
+  String? _seleccionado;
+  final Map<String, Map<String, List<Offset>>> _puntos = {
+    'frontal': {},
+    'lateral': {},
+  };
 
   Size? _frontalSize;
   Size? _lateralSize;
   bool _cargando = true;
   bool _procesando = false;
   String? _error;
-  int _paso = 0;
-  bool _usarLateral = false;
-  double? _mmPorPx;
-  final Map<String, List<Offset>> _puntos = {};
-  final Map<String, double> _calibradoresPx = {};
-  final Map<String, double> _calibradoresMmPorPx = {};
-  final Set<String> _pasosSaltados = {};
-  final Map<String, double> _medidasMm = {};
 
-  List<_MedicionPaso> get _pasosManual {
-    final hayLateral = _hayLateral;
-    return [
-      const _MedicionPaso.calibracion(
-        id: 'calibracion_barra_longitud',
-        titulo: 'Calibrador - barra completa',
-        ayuda: 'Marca los dos extremos de la barra radiopaca vertical.',
-        calibradorMm: _barraLongMm,
-        opcional: true,
-      ),
-      const _MedicionPaso.calibracion(
-        id: 'calibracion_barra_diametro',
-        titulo: 'Calibrador - grosor de barra',
-        ayuda: 'Marca los dos bordes del grosor de la barra.',
-        calibradorMm: _barraDiamMm,
-        opcional: true,
-      ),
-      const _MedicionPaso.calibracion(
-        id: 'calibracion_bola_1',
-        titulo: 'Calibrador - bola 1',
-        ayuda: 'Marca el diametro de una bola metalica.',
-        calibradorMm: _bolaMm,
-        opcional: true,
-      ),
-      const _MedicionPaso.calibracion(
-        id: 'calibracion_bola_2',
-        titulo: 'Calibrador - bola 2',
-        ayuda: 'Marca el diametro de otra bola metalica.',
-        calibradorMm: _bolaMm,
-        opcional: true,
-      ),
-      const _MedicionPaso.calibracion(
-        id: 'calibracion_bola_3',
-        titulo: 'Calibrador - bola 3',
-        ayuda: 'Marca el diametro de la tercera bola metalica.',
-        calibradorMm: _bolaMm,
-        opcional: true,
-      ),
-      const _MedicionPaso(
-        id: 'tibia_anchura_mm',
-        titulo: 'Tibia - anchura',
-        ayuda: 'Marca los dos bordes de la tibia distal.',
-      ),
-      const _MedicionPaso(
-        id: 'perone_anchura_mm',
-        titulo: 'Perone - anchura',
-        ayuda: 'Marca los dos bordes del perone distal.',
-      ),
-      const _MedicionPaso(
-        id: 'astragalo_anchura_mm',
-        titulo: 'Astragalo - anchura',
-        ayuda: 'Marca la anchura maxima del astragalo.',
-      ),
-      _MedicionPaso(
-        id: 'astragalo_altura_mm',
-        titulo: 'Astragalo - altura',
-        ayuda: 'Marca la altura del astragalo; usa lateral si se ve mejor.',
-        preferLateral: hayLateral,
-      ),
-      _MedicionPaso(
-        id: 'calcaneo_longitud_mm',
-        titulo: 'Calcaneo - longitud',
-        ayuda: 'Marca la longitud maxima antero-posterior del calcaneo.',
-        preferLateral: hayLateral,
-      ),
-      _MedicionPaso(
-        id: 'calcaneo_altura_mm',
-        titulo: 'Calcaneo - altura',
-        ayuda: 'Marca la altura maxima del calcaneo.',
-        preferLateral: hayLateral,
-      ),
-    ];
-  }
+  // ── Getters ──────────────────────────────────────────────────────────────────
 
-  _MedicionPaso get _pasoActualManual => _pasosManual[_paso];
-  bool get _hayLateral => widget.plan.fotoLateralPath != null && _lateralSize != null;
+  String get _tabKey => _tab == 0 ? 'frontal' : 'lateral';
   String? get _imagenActivaPath =>
-      _usarLateral ? widget.plan.fotoLateralPath : widget.plan.fotoPath;
-  Size? get _imagenActivaSize => _usarLateral ? _lateralSize : _frontalSize;
-
-  List<_MedicionPaso> get _pasosCalibracion =>
-      _pasosManual.where((p) => p.esCalibracion).toList();
-
-  String get _calibradoresLabel {
-    final total = _calibradoresMmPorPx.length;
-    if (total == 0) return 'pendientes';
-    return '$total calibrador${total == 1 ? '' : 'es'}';
-  }
+      _tab == 0 ? widget.plan.fotoPath : widget.plan.fotoLateralPath;
+  Size? get _imagenActivaSize => _tab == 0 ? _frontalSize : _lateralSize;
+  bool get _hayLateral =>
+      widget.plan.fotoLateralPath != null && _lateralSize != null;
 
   double _mediana(List<double> values) {
     final sorted = List<double>.from(values)..sort();
@@ -182,31 +120,49 @@ class _MedicionManualMilimetricaScreenState
         : (sorted[mid - 1] + sorted[mid]) / 2.0;
   }
 
-  void _recalcularEscala() {
-    _mmPorPx = _calibradoresMmPorPx.isEmpty
-        ? null
-        : _mediana(_calibradoresMmPorPx.values.toList());
-  }
-
-  List<String> get _faltantes => [
-        for (final p in _pasosManual)
-          if (!p.esCalibracion && !_medidasMm.containsKey(p.id)) p.titulo,
-      ];
-
-  bool get _puedeProcesar =>
-      _mmPorPx != null && _faltantes.isEmpty && !_procesando;
-
-  bool get _esUltimoPaso => _paso >= _pasosManual.length - 1;
-
-  bool _pasoCompleto(_MedicionPaso paso) {
-    if (_pasosSaltados.contains(paso.id)) return true;
-    final pts = _puntos[paso.id] ?? const <Offset>[];
-    if (pts.length != 2) return false;
-    if (paso.esCalibracion) {
-      return _calibradoresMmPorPx.containsKey(paso.id);
+  double? _mmPorPxTab(String tabKey) {
+    final ratios = <double>[];
+    for (final e in _kRefMm.entries) {
+      final pts = _puntos[tabKey]![e.key];
+      if (pts != null && pts.length == 2) {
+        final dist = (pts[1] - pts[0]).distance;
+        if (dist > 0) ratios.add(e.value / dist);
+      }
     }
-    return _medidasMm.containsKey(paso.id);
+    return ratios.isEmpty ? null : _mediana(ratios);
   }
+
+  double? get _mmPorPxFrontal => _mmPorPxTab('frontal');
+  double? get _mmPorPxLateral =>
+      _mismaMagnificacion ? _mmPorPxFrontal : _mmPorPxTab('lateral');
+  double? get _mmPorPxActual => _tab == 0 ? _mmPorPxFrontal : _mmPorPxLateral;
+
+  double? _medidaMm(String id) {
+    final tabKey = _kMedFrontal.containsKey(id) ? 'frontal' : 'lateral';
+    final mmPx = tabKey == 'frontal' ? _mmPorPxFrontal : _mmPorPxLateral;
+    if (mmPx == null) return null;
+    final pts = _puntos[tabKey]![id];
+    if (pts == null || pts.length != 2) return null;
+    return (pts[1] - pts[0]).distance * mmPx;
+  }
+
+  Map<String, double> get _todasLasMedidas {
+    final result = <String, double>{};
+    for (final id in [..._kMedFrontal.keys, ..._kMedLateral.keys]) {
+      final mm = _medidaMm(id);
+      if (mm != null) result[id] = mm;
+    }
+    return result;
+  }
+
+  bool get _puedeProcesar {
+    if (_procesando || _mmPorPxFrontal == null) return false;
+    final medidas = _todasLasMedidas;
+    return _kMedFrontal.keys.every(medidas.containsKey) &&
+        _kMedLateral.keys.every(medidas.containsKey);
+  }
+
+  // ── Lifecycle ─────────────────────────────────────────────────────────────────
 
   @override
   void initState() {
@@ -217,7 +173,7 @@ class _MedicionManualMilimetricaScreenState
   Future<void> _cargarImagenes() async {
     try {
       if (widget.plan.fotoPath == null) {
-        throw Exception('No se proporciono ninguna radiografia frontal');
+        throw Exception('No se proporcionó ninguna radiografía frontal');
       }
       final frontal = await _leerTamano(widget.plan.fotoPath!);
       Size? lateral;
@@ -247,89 +203,20 @@ class _MedicionManualMilimetricaScreenState
     return size;
   }
 
-  void _irPaso(int nuevo) {
-    if (nuevo > _paso && !_pasoCompleto(_pasoActualManual)) return;
-    final pasos = _pasosManual;
-    final idx = nuevo.clamp(0, pasos.length - 1);
-    if (!pasos[idx].esCalibracion && _mmPorPx == null) return;
-    setState(() {
-      _paso = idx;
-      _usarLateral = pasos[idx].preferLateral && _hayLateral;
-    });
-  }
+  // ── Anotación ─────────────────────────────────────────────────────────────────
 
   void _registrarPunto(Offset imagePoint) {
-    final paso = _pasoActualManual;
-    final pasoIndex = _paso;
-    final pts = List<Offset>.from(_puntos[paso.id] ?? const []);
-    if (pts.length >= 2) {
-      pts.clear();
-      if (paso.esCalibracion) {
-        _calibradoresPx.remove(paso.id);
-        _calibradoresMmPorPx.remove(paso.id);
-        _pasosSaltados.remove(paso.id);
-        _recalcularEscala();
-        _medidasMm.clear();
-      } else {
-        _medidasMm.remove(paso.id);
-      }
-    }
+    if (_seleccionado == null) return;
+    final id = _seleccionado!;
+    final tabKey = _tabKey;
+    final pts = List<Offset>.from(_puntos[tabKey]![id] ?? const []);
+    if (pts.length >= 2) pts.clear();
     pts.add(imagePoint);
-    _puntos[paso.id] = pts;
-
-    if (pts.length == 2) {
-      final distanciaPx = (pts[1] - pts[0]).distance;
-      if (paso.esCalibracion) {
-        _calibradoresPx[paso.id] = distanciaPx;
-        _calibradoresMmPorPx[paso.id] = paso.calibradorMm! / distanciaPx;
-        _pasosSaltados.remove(paso.id);
-        _recalcularEscala();
-        _medidasMm.clear();
-      } else if (_mmPorPx != null) {
-        _medidasMm[paso.id] = distanciaPx * _mmPorPx!;
-      }
-    }
-    setState(() {});
-
-    if (pts.length == 2 && pasoIndex < _pasosManual.length - 1) {
-      Future.delayed(const Duration(milliseconds: 550), () {
-        if (!mounted || _paso != pasoIndex) return;
-        if (!_pasoCompleto(paso)) return;
-        _irPaso(pasoIndex + 1);
-      });
-    }
+    setState(() => _puntos[tabKey]![id] = pts);
   }
 
-  void _limpiarPaso() {
-    final paso = _pasoActualManual;
-    setState(() {
-      _puntos.remove(paso.id);
-      if (paso.esCalibracion) {
-        _calibradoresPx.remove(paso.id);
-        _calibradoresMmPorPx.remove(paso.id);
-        _pasosSaltados.remove(paso.id);
-        _recalcularEscala();
-        _medidasMm.clear();
-      } else {
-        _medidasMm.remove(paso.id);
-      }
-    });
-  }
-
-  void _saltarPasoCalibracion() {
-    final paso = _pasoActualManual;
-    if (!paso.esCalibracion || !paso.opcional) return;
-    setState(() {
-      _puntos.remove(paso.id);
-      _calibradoresPx.remove(paso.id);
-      _calibradoresMmPorPx.remove(paso.id);
-      _pasosSaltados.add(paso.id);
-      _recalcularEscala();
-    });
-    Future.delayed(const Duration(milliseconds: 150), () {
-      if (!mounted) return;
-      _irPaso(_paso + 1);
-    });
+  void _limpiarPuntos(String id, String tabKey) {
+    setState(() => _puntos[tabKey]!.remove(id));
   }
 
   void _procesarManual() {
@@ -341,26 +228,36 @@ class _MedicionManualMilimetricaScreenState
       MaterialPageRoute(
         builder: (_) => ProcesandoIAScreen(
           plan: widget.plan,
-          medidasManual: Map<String, double>.from(_medidasMm),
+          medidasManual: _todasLasMedidas,
           diagnosticoManual: {
-            'metodo_calibracion': 'manual_guiado',
-            'mm_por_px': _mmPorPx,
-            'calibradores_px': Map<String, double>.from(_calibradoresPx),
-            'calibradores_mm_por_px':
-                Map<String, double>.from(_calibradoresMmPorPx),
-            'calibradores_usados': _calibradoresMmPorPx.keys.toList(),
-            'calibradores_saltados': _pasosSaltados.toList(),
+            'metodo_calibracion': 'manual_libre',
+            'mm_por_px_frontal': _mmPorPxFrontal,
+            'mm_por_px_lateral': _mmPorPxLateral,
+            'misma_magnificacion': _mismaMagnificacion,
             'medicion_manual': true,
-            'longitudes_proximales_estimadas': true,
           },
         ),
       ),
     );
   }
 
+  Rect _imageRect(Size image, Size box) {
+    final fitted = applyBoxFit(BoxFit.contain, image, box);
+    return Alignment.center.inscribe(fitted.destination, Offset.zero & box);
+  }
+
+  Offset? _localToImage(Offset local, Rect rect, Size image) {
+    if (!rect.contains(local)) return null;
+    return Offset(
+      (local.dx - rect.left) / rect.width * image.width,
+      (local.dy - rect.top) / rect.height * image.height,
+    );
+  }
+
+  // ── Build ─────────────────────────────────────────────────────────────────────
+
   @override
   Widget build(BuildContext context) {
-    final dark = AppTheme.darkText;
     return Scaffold(
       backgroundColor: Colors.transparent,
       body: Container(
@@ -372,425 +269,547 @@ class _MedicionManualMilimetricaScreenState
           ),
         ),
         child: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(18, 16, 18, 18),
-            child: _cargando
-                ? const Center(child: CircularProgressIndicator())
-                : (_error != null
-                    ? _manualError(dark)
-                    : Column(children: [
-                        _manualHeader(dark),
-                        const SizedBox(height: 14),
-                        Expanded(child: _manualBody(dark)),
-                      ])),
-          ),
+          child: _cargando
+              ? const Center(child: CircularProgressIndicator())
+              : _error != null
+                  ? _buildError()
+                  : _buildContent(),
         ),
       ),
     );
   }
 
-  Widget _manualError(Color dark) {
+  Widget _buildError() {
     return Center(
       child: Column(mainAxisSize: MainAxisSize.min, children: [
         const Icon(Icons.error_outline_rounded,
             color: Colors.redAccent, size: 44),
         const SizedBox(height: 14),
-        Text(_error ?? 'Error',
+        Text(_error!,
             textAlign: TextAlign.center,
-            style: TextStyle(color: dark, fontWeight: FontWeight.w700)),
+            style: TextStyle(
+                color: AppTheme.darkText, fontWeight: FontWeight.w700)),
         const SizedBox(height: 12),
         TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Volver'),
-        ),
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Volver')),
       ]),
     );
   }
 
-  Widget _manualHeader(Color dark) {
-    return Row(children: [
-      GestureDetector(
-        onTap: () => Navigator.pop(context),
-        child: Container(
-          padding: const EdgeInsets.all(10),
-          decoration: BoxDecoration(
-            color: AppTheme.lockedCardBg,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: AppTheme.cardBorder, width: 1.2),
-          ),
-          child: Icon(Icons.arrow_back_ios_new_rounded,
-              color: dark, size: 18),
-        ),
-      ),
-      const SizedBox(width: 14),
-      Expanded(child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('Medicion milimetrica',
-              style: TextStyle(color: dark,
-                  fontSize: 24, fontWeight: FontWeight.w800)),
-          Text('Marca 2 puntos por paso; la escala sale del calibrador',
-              style: TextStyle(color: AppTheme.subtitleColor, fontSize: 12)),
-        ],
-      )),
-      Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-        decoration: BoxDecoration(
-          color: _purple.withOpacity(0.12),
-          borderRadius: BorderRadius.circular(999),
-          border: Border.all(color: _purple.withOpacity(0.25)),
-        ),
-        child: Row(mainAxisSize: MainAxisSize.min, children: [
-          const Icon(Icons.straighten_rounded, color: _purple, size: 15),
-          const SizedBox(width: 6),
-          Text('Sin IA',
-              style: TextStyle(color: _purple,
-                  fontSize: 11, fontWeight: FontWeight.w800)),
-        ]),
-      ),
+  Widget _buildContent() {
+    return Column(children: [
+      _buildHeader(),
+      Expanded(child: _buildBody()),
     ]);
   }
 
-  Widget _manualBody(Color dark) {
+  Widget _buildHeader() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      child: Row(children: [
+        GestureDetector(
+          onTap: () => Navigator.pop(context),
+          child: Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: AppTheme.lockedCardBg,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: AppTheme.cardBorder, width: 1.2),
+            ),
+            child: Icon(Icons.arrow_back_ios_new_rounded,
+                color: AppTheme.darkText, size: 18),
+          ),
+        ),
+        const SizedBox(width: 14),
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('Medición milimétrica',
+                style: TextStyle(
+                    color: AppTheme.darkText,
+                    fontSize: 22,
+                    fontWeight: FontWeight.w800)),
+            Text('Selecciona un elemento y marca 2 puntos',
+                style:
+                    TextStyle(color: AppTheme.subtitleColor, fontSize: 12)),
+          ]),
+        ),
+        if (_hayLateral)
+          GestureDetector(
+            onTap: () =>
+                setState(() => _mismaMagnificacion = !_mismaMagnificacion),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 180),
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: _mismaMagnificacion
+                    ? _kAccent.withOpacity(0.15)
+                    : AppTheme.lockedCardBg,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: _mismaMagnificacion
+                      ? _kAccent
+                      : AppTheme.cardBorder,
+                  width: 1.2,
+                ),
+              ),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                Icon(
+                  _mismaMagnificacion
+                      ? Icons.link_rounded
+                      : Icons.link_off_rounded,
+                  color: _mismaMagnificacion
+                      ? _kAccent
+                      : AppTheme.subtitleColor,
+                  size: 15,
+                ),
+                const SizedBox(width: 5),
+                Text('Misma distancia',
+                    style: TextStyle(
+                      color: _mismaMagnificacion
+                          ? _kAccent
+                          : AppTheme.subtitleColor,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                    )),
+              ]),
+            ),
+          ),
+      ]),
+    );
+  }
+
+  Widget _buildBody() {
     return LayoutBuilder(builder: (context, c) {
-      final wide = c.maxWidth >= 980;
-      final imagePanel = _imagePanel(dark);
-      final panel = SizedBox(
-        width: wide ? 390 : double.infinity,
-        child: _controlPanel(dark),
-      );
-      return wide
-          ? Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-              Expanded(flex: 7, child: imagePanel),
-              const SizedBox(width: 16),
-              panel,
-            ])
-          : Column(children: [
-              Expanded(child: imagePanel),
-              const SizedBox(height: 12),
-              panel,
-            ]);
+      final wide = c.maxWidth >= 860;
+      if (wide) {
+        return Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Expanded(flex: 7, child: _buildImageArea()),
+          _buildSidePanel(),
+        ]);
+      }
+      return Column(children: [
+        Expanded(child: _buildImageArea()),
+        _buildBottomPanel(),
+      ]);
     });
   }
 
-  Widget _imagePanel(Color dark) {
+  Widget _buildImageArea() {
+    return Column(children: [
+      if (_hayLateral) _buildTabBar(),
+      Expanded(child: _buildImagePanel()),
+    ]);
+  }
+
+  Widget _buildTabBar() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
+      child: Row(children: [
+        for (int i = 0; i < 2; i++) ...[
+          if (i > 0) const SizedBox(width: 8),
+          GestureDetector(
+            onTap: () => setState(() => _tab = i),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 180),
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
+              decoration: BoxDecoration(
+                color: _tab == i ? _kAccent : AppTheme.lockedCardBg,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: _tab == i ? _kAccent : AppTheme.cardBorder,
+                  width: 1.2,
+                ),
+              ),
+              child: Text(
+                i == 0 ? 'Frontal' : 'Lateral',
+                style: TextStyle(
+                  color: _tab == i ? Colors.white : AppTheme.subtitleColor,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 13,
+                ),
+              ),
+            ),
+          ),
+        ],
+        const Spacer(),
+        if (_mmPorPxActual != null)
+          Text(
+            '${_mmPorPxActual!.toStringAsFixed(4)} mm/px',
+            style: TextStyle(
+                color: _kRef,
+                fontSize: 11.5,
+                fontWeight: FontWeight.w700),
+          ),
+      ]),
+    );
+  }
+
+  Widget _buildImagePanel() {
     final path = _imagenActivaPath;
     final imageSize = _imagenActivaSize;
     if (path == null || imageSize == null) {
-      return Center(child: Text('Imagen no disponible',
-          style: TextStyle(color: dark)));
+      return Center(
+        child: Text(
+          _tab == 1 ? 'No hay imagen lateral' : 'Imagen no disponible',
+          style: TextStyle(color: AppTheme.subtitleColor),
+        ),
+      );
     }
-    final pts = _puntos[_pasoActualManual.id] ?? const <Offset>[];
+    final tabPuntos = _puntos[_tabKey]!;
 
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(18),
-      child: Container(
-        color: Colors.black,
-        child: LayoutBuilder(builder: (context, c) {
-          final size = Size(c.maxWidth, c.maxHeight);
-          final rect = _imageRect(imageSize, size);
-          return GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTapDown: (d) {
-              final p = _localToImage(d.localPosition, rect, imageSize);
-              if (p != null) _registrarPunto(p);
-            },
-            child: Stack(children: [
-              Positioned.fromRect(
-                rect: rect,
-                child: Image.file(File(path), fit: BoxFit.fill),
-              ),
-              Positioned.fill(
-                child: CustomPaint(
-                  painter: _MedicionPainter(
-                    imageRect: rect,
-                    imageSize: imageSize,
-                    points: pts,
-                    color: _purpleL,
+    return Padding(
+      padding: const EdgeInsets.all(12),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: Container(
+          color: Colors.black,
+          child: LayoutBuilder(builder: (context, c) {
+            final size = Size(c.maxWidth, c.maxHeight);
+            final rect = _imageRect(imageSize, size);
+            return GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTapDown: (d) {
+                if (_seleccionado == null) return;
+                final p = _localToImage(d.localPosition, rect, imageSize);
+                if (p != null) _registrarPunto(p);
+              },
+              child: Stack(children: [
+                Positioned.fromRect(
+                  rect: rect,
+                  child: Image.file(File(path), fit: BoxFit.fill),
+                ),
+                Positioned.fill(
+                  child: CustomPaint(
+                    painter: _AnotacionPainter(
+                      imageRect: rect,
+                      imageSize: imageSize,
+                      puntosTodos: tabPuntos,
+                      seleccionado: _seleccionado,
+                      colorRef: _kRef,
+                      colorMed: _kMed,
+                    ),
                   ),
                 ),
-              ),
-            ]),
-          );
-        }),
+              ]),
+            );
+          }),
+        ),
       ),
     );
   }
 
-  Rect _imageRect(Size image, Size box) {
-    final fitted = applyBoxFit(BoxFit.contain, image, box);
-    return Alignment.center.inscribe(
-      fitted.destination,
-      Offset.zero & box,
+  Widget _buildSidePanel() {
+    return SizedBox(
+      width: 320,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(0, 12, 16, 12),
+        child: _buildPanelContent(),
+      ),
     );
   }
 
-  Offset? _localToImage(Offset local, Rect rect, Size image) {
-    if (!rect.contains(local)) return null;
-    return Offset(
-      (local.dx - rect.left) / rect.width * image.width,
-      (local.dy - rect.top) / rect.height * image.height,
+  Widget _buildBottomPanel() {
+    return SizedBox(
+      height: 300,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+        child: _buildPanelContent(),
+      ),
     );
   }
 
-  Widget _controlPanel(Color dark) {
-    final paso = _pasoActualManual;
-    final pts = _puntos[paso.id] ?? const <Offset>[];
-    final distanciaPx = pts.length == 2 ? (pts[1] - pts[0]).distance : null;
-    final valorMedido = paso.esCalibracion
-        ? _calibradoresMmPorPx[paso.id]
-        : _medidasMm[paso.id];
-    final pasoCompleto = _pasoCompleto(paso);
-    final siguientePaso = _esUltimoPaso ? null : _pasosManual[_paso + 1];
-    final puedeContinuar = pasoCompleto &&
-        !_esUltimoPaso &&
-        (siguientePaso!.esCalibracion || _mmPorPx != null);
+  Widget _buildPanelContent() {
+    return Container(
+      decoration: BoxDecoration(
+        color: AppTheme.cardBg1,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: AppTheme.cardBorder, width: 1.2),
+      ),
+      child: Column(children: [
+        Expanded(child: _buildItemList()),
+        _buildProcesarButton(),
+      ]),
+    );
+  }
 
-    return SingleChildScrollView(
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: AppTheme.cardBg1,
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: AppTheme.cardBorder, width: 1.2),
-        ),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          Text('Referencia ${_paso + 1} / ${_pasosManual.length}',
-              style: TextStyle(color: AppTheme.subtitleColor,
-                  fontSize: 12, fontWeight: FontWeight.w700)),
-          const SizedBox(height: 6),
-          Text(paso.titulo,
-              style: TextStyle(color: dark,
-                  fontSize: 20, fontWeight: FontWeight.w800)),
-          const SizedBox(height: 6),
-          Text(paso.ayuda,
-              style: TextStyle(color: AppTheme.subtitleColor,
-                  fontSize: 12.5, height: 1.35)),
-          const SizedBox(height: 14),
+  Widget _buildItemList() {
+    final tabKey = _tabKey;
+    final tabPuntos = _puntos[tabKey]!;
+    final mmPx = _mmPorPxActual;
 
-          if (_hayLateral) _vistaSelector(),
+    final meds = tabKey == 'frontal'
+        ? _kMedFrontal.entries.toList()
+        : _kMedLateral.entries.toList();
 
-          _valorBox(
-            dark,
-            paso.esCalibracion
-                ? (valorMedido == null
-                    ? 'Calibrador pendiente'
-                    : '${valorMedido.toStringAsFixed(4)} mm/px')
-                : (valorMedido == null
-                    ? 'Medida pendiente'
-                    : '${valorMedido.toStringAsFixed(1)} mm'),
-            distanciaPx == null
-                ? 'Puntos marcados: ${pts.length}/2'
-                : (paso.esCalibracion
-                    ? '${distanciaPx.toStringAsFixed(1)} px = ${paso.calibradorMm!.toStringAsFixed(2)} mm'
-                    : 'Distancia: ${distanciaPx.toStringAsFixed(1)} px'),
-          ),
-          if (paso.esCalibracion && _mmPorPx != null) ...[
-            const SizedBox(height: 8),
-            Text(
-              'Escala final actual: ${_mmPorPx!.toStringAsFixed(4)} mm/px con $_calibradoresLabel.',
-              style: TextStyle(color: AppTheme.subtitleColor, fontSize: 11.5),
-            ),
-          ],
-          const SizedBox(height: 8),
+    final refMarcadas = _kRefMm.keys
+        .where((id) => (tabPuntos[id]?.length ?? 0) == 2)
+        .length;
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
+      children: [
+        Row(children: [
+          Text('CALIBRACIÓN',
+              style: TextStyle(
+                  color: _kRef,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 0.8)),
+          const SizedBox(width: 6),
           Text(
-            pasoCompleto
-                ? (_mmPorPx == null && siguientePaso?.esCalibracion == false
-                    ? 'Necesitas medir al menos un calibrador antes de pasar a huesos.'
-                    : _esUltimoPaso
-                    ? 'Referencia final completada. Ya puedes generar el biomodelo.'
-                    : 'Referencia guardada. Continuando con la siguiente...')
-                : 'Marca el punto ${pts.length + 1} de 2 en la imagen.',
+            refMarcadas == 0 ? '— marca al menos 1' : '— $refMarcadas marcada${refMarcadas > 1 ? 's' : ''}',
             style: TextStyle(
-              color: pasoCompleto ? _purple : AppTheme.subtitleColor,
-              fontSize: 11.5,
-              fontWeight: pasoCompleto ? FontWeight.w700 : FontWeight.w500,
-            ),
+                color: refMarcadas == 0
+                    ? _kRef.withOpacity(0.6)
+                    : Colors.green.shade600,
+                fontSize: 9.5,
+                fontWeight: FontWeight.w600),
           ),
-
-          const SizedBox(height: 12),
-          Row(children: [
-            Expanded(
-              child: OutlinedButton.icon(
-                onPressed: pts.isEmpty ? null : _limpiarPaso,
-                icon: const Icon(Icons.backspace_outlined, size: 17),
-                label: const Text('Limpiar'),
-              ),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: OutlinedButton.icon(
-                onPressed: _paso == 0 ? null : () => _irPaso(_paso - 1),
-                icon: const Icon(Icons.chevron_left_rounded, size: 18),
-                label: const Text('Anterior'),
-              ),
-            ),
-          ]),
-          if (paso.esCalibracion && paso.opcional) ...[
-            const SizedBox(height: 10),
-            OutlinedButton.icon(
-              onPressed: _saltarPasoCalibracion,
-              icon: const Icon(Icons.visibility_off_outlined, size: 17),
-              label: const Text('No se ve, saltar'),
-            ),
-          ],
+        ]),
+        const SizedBox(height: 6),
+        // Bolas: agrupadas, solo hace falta una
+        _buildItem(
+          id: 'bola_1',
+          label: 'Bola (cualquiera)',
+          subtitle: '9.98 mm — marca el diámetro de una bola',
+          color: _kRef,
+          tabKey: tabKey,
+          tabPuntos: tabPuntos,
+          isRef: true,
+        ),
+        _buildItem(
+          id: 'barra_longitud',
+          label: 'Barra – longitud',
+          subtitle: '96.30 mm — extremo a extremo',
+          color: _kRef,
+          tabKey: tabKey,
+          tabPuntos: tabPuntos,
+          isRef: true,
+        ),
+        _buildItem(
+          id: 'barra_diametro',
+          label: 'Barra – grosor',
+          subtitle: '7.98 mm — borde a borde',
+          color: _kRef,
+          tabKey: tabKey,
+          tabPuntos: tabPuntos,
+          isRef: true,
+        ),
+        const SizedBox(height: 10),
+        Text('HUESOS',
+            style: TextStyle(
+                color: _kMed,
+                fontSize: 10,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 0.8)),
+        const SizedBox(height: 6),
+        for (final e in meds)
+          _buildItem(
+            id: e.key,
+            label: e.value,
+            subtitle: '',
+            color: _kMed,
+            tabKey: tabKey,
+            tabPuntos: tabPuntos,
+            mmPx: mmPx,
+            isRef: false,
+          ),
+        if (tabKey == 'lateral') ...[
           const SizedBox(height: 10),
-          ElevatedButton.icon(
-            onPressed: puedeContinuar
-                ? () => _irPaso(_paso + 1)
-                : null,
-            icon: const Icon(Icons.chevron_right_rounded),
-            label: const Text('Continuar'),
-          ),
+          Text('FRONTAL (completados)',
+              style: TextStyle(
+                  color: AppTheme.subtitleColor2,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 0.8)),
+          const SizedBox(height: 6),
+          for (final e in _kMedFrontal.entries)
+            _buildItem(
+              id: e.key,
+              label: e.value,
+              subtitle: '',
+              color: _kMed,
+              tabKey: 'frontal',
+              tabPuntos: _puntos['frontal']!,
+              mmPx: _mmPorPxFrontal,
+              isRef: false,
+              disabled: true,
+            ),
+        ],
+      ],
+    );
+  }
 
-          const SizedBox(height: 16),
-          _resumenMedidas(dark),
-          const SizedBox(height: 16),
-          ElevatedButton.icon(
-            onPressed: _puedeProcesar ? _procesarManual : null,
-            icon: _procesando
-                ? const SizedBox(
-                    width: 17, height: 17,
-                    child: CircularProgressIndicator(strokeWidth: 2))
-                : const Icon(Icons.view_in_ar_rounded),
-            label: const Text('Generar biomodelo 3D'),
-            style: ElevatedButton.styleFrom(
-              minimumSize: const Size.fromHeight(52),
-              backgroundColor: _purple,
-              foregroundColor: Colors.white,
+  Widget _buildItem({
+    required String id,
+    required String label,
+    required String subtitle,
+    required Color color,
+    required String tabKey,
+    required Map<String, List<Offset>> tabPuntos,
+    double? mmPx,
+    required bool isRef,
+    bool disabled = false,
+  }) {
+    final pts = tabPuntos[id] ?? const <Offset>[];
+    final isSelected = _seleccionado == id && !disabled;
+    final complete = pts.length == 2;
+
+    String? valueStr;
+    if (complete) {
+      final dist = (pts[1] - pts[0]).distance;
+      if (isRef) {
+        final ratio = _kRefMm[id]! / dist;
+        valueStr = '${ratio.toStringAsFixed(4)} mm/px';
+      } else if (mmPx != null) {
+        valueStr = '${(dist * mmPx).toStringAsFixed(1)} mm';
+      }
+    }
+
+    return GestureDetector(
+      onTap: disabled
+          ? null
+          : () {
+              setState(() {
+                _seleccionado = isSelected ? null : id;
+                if (!isSelected && !isRef) {
+                  if (_kMedLateral.containsKey(id) && _tab != 1) _tab = 1;
+                  if (_kMedFrontal.containsKey(id) && _tab != 0) _tab = 0;
+                }
+              });
+            },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 160),
+        margin: const EdgeInsets.only(bottom: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+        decoration: BoxDecoration(
+          color: isSelected
+              ? color.withOpacity(0.15)
+              : complete
+                  ? color.withOpacity(0.06)
+                  : AppTheme.cardBg2,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: isSelected
+                ? color
+                : complete
+                    ? color.withOpacity(0.4)
+                    : AppTheme.cardBorder,
+            width: isSelected ? 1.8 : 1.0,
+          ),
+        ),
+        child: Row(children: [
+          Icon(
+            complete
+                ? Icons.check_circle_rounded
+                : isSelected
+                    ? Icons.radio_button_on_rounded
+                    : Icons.radio_button_off_rounded,
+            color: complete
+                ? color
+                : isSelected
+                    ? color
+                    : AppTheme.subtitleColor,
+            size: 15,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(label,
+                    style: TextStyle(
+                      color: disabled
+                          ? AppTheme.subtitleColor2
+                          : AppTheme.darkText,
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w700,
+                    )),
+                if (subtitle.isNotEmpty)
+                  Text(subtitle,
+                      style: TextStyle(
+                          color: AppTheme.subtitleColor2,
+                          fontSize: 10.5)),
+              ],
             ),
           ),
-          if (!_puedeProcesar && !_procesando) ...[
-            const SizedBox(height: 8),
-            Text(_mmPorPx == null
-                ? 'Primero completa al menos un calibrador.'
-                : 'Faltan: ${_faltantes.take(3).join(', ')}${_faltantes.length > 3 ? '...' : ''}',
-                style: TextStyle(color: AppTheme.subtitleColor, fontSize: 11.5)),
+          if (valueStr != null)
+            Text(valueStr,
+                style: TextStyle(
+                    color: color,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w800)),
+          if (pts.isNotEmpty && !disabled) ...[
+            const SizedBox(width: 6),
+            GestureDetector(
+              onTap: () => _limpiarPuntos(id, tabKey),
+              child: Icon(Icons.close_rounded,
+                  size: 14, color: AppTheme.subtitleColor),
+            ),
           ],
         ]),
       ),
     );
   }
 
-  Widget _vistaSelector() {
+  Widget _buildProcesarButton() {
+    final done = _todasLasMedidas.length;
+    final total = _kMedFrontal.length + _kMedLateral.length;
+
     return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: SegmentedButton<bool>(
-        segments: const [
-          ButtonSegment(value: false, label: Text('Frontal')),
-          ButtonSegment(value: true, label: Text('Lateral')),
-        ],
-        selected: {_usarLateral},
-        onSelectionChanged: (s) => setState(() => _usarLateral = s.first),
-      ),
-    );
-  }
-
-  Widget _valorBox(Color dark, String title, String subtitle) {
-    return Container(
       padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: AppTheme.cardBg2,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppTheme.cardBorder),
-      ),
-      child: Row(children: [
-        const Icon(Icons.straighten_rounded, color: _purple, size: 20),
-        const SizedBox(width: 10),
-        Expanded(child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(title, style: TextStyle(color: dark,
-                fontSize: 15, fontWeight: FontWeight.w800)),
-            Text(subtitle, style: TextStyle(
-                color: AppTheme.subtitleColor, fontSize: 11.5)),
-          ],
-        )),
-      ]),
-    );
-  }
-
-  Widget _resumenMedidas(Color dark) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: AppTheme.cardBg2,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppTheme.cardBorder),
-      ),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text('Resumen',
-            style: TextStyle(color: dark,
-                fontSize: 13, fontWeight: FontWeight.w800)),
-        const SizedBox(height: 8),
-        Text(_mmPorPx == null
-            ? 'Calibradores: pendientes'
-            : 'Escala: ${_mmPorPx!.toStringAsFixed(4)} mm/px ($_calibradoresLabel)',
-            style: TextStyle(color: AppTheme.subtitleColor, fontSize: 11.5)),
-        const SizedBox(height: 6),
-        for (final p in _pasosCalibracion)
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        if (!_puedeProcesar)
           Padding(
-            padding: const EdgeInsets.only(top: 3),
+            padding: const EdgeInsets.only(bottom: 8),
             child: Text(
-              _pasosSaltados.contains(p.id)
-                  ? '${p.titulo}: saltado'
-                  : '${p.titulo}: ${_calibradoresPx[p.id]?.toStringAsFixed(1) ?? '--'} px',
-              style: TextStyle(color: AppTheme.subtitleColor2, fontSize: 11.5),
+              _mmPorPxFrontal == null
+                  ? 'Primero calibra con las referencias (naranja)'
+                  : 'Medidas: $done / $total',
+              style:
+                  TextStyle(color: AppTheme.subtitleColor, fontSize: 11),
+              textAlign: TextAlign.center,
             ),
           ),
-        const SizedBox(height: 6),
-        for (final p in _pasosManual.where((p) => !p.esCalibracion))
-          Padding(
-            padding: const EdgeInsets.only(top: 3),
-            child: Text(
-              '${p.titulo}: ${_medidasMm[p.id]?.toStringAsFixed(1) ?? '--'} mm',
-              style: TextStyle(color: AppTheme.subtitleColor2, fontSize: 11.5),
-            ),
+        ElevatedButton.icon(
+          onPressed: _puedeProcesar ? _procesarManual : null,
+          icon: _procesando
+              ? const SizedBox(
+                  width: 17,
+                  height: 17,
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2, color: Colors.white))
+              : const Icon(Icons.view_in_ar_rounded),
+          label: const Text('Generar biomodelo 3D'),
+          style: ElevatedButton.styleFrom(
+            minimumSize: const Size.fromHeight(48),
+            backgroundColor: _kAccent,
+            foregroundColor: Colors.white,
           ),
+        ),
       ]),
     );
   }
 }
 
-class _MedicionPaso {
-  final String id;
-  final String titulo;
-  final String ayuda;
-  final bool preferLateral;
-  final bool esCalibracion;
-  final double? calibradorMm;
-  final bool opcional;
-
-  const _MedicionPaso({
-    required this.id,
-    required this.titulo,
-    required this.ayuda,
-    this.preferLateral = false,
-  })  : esCalibracion = false,
-        calibradorMm = null,
-        opcional = false;
-
-  const _MedicionPaso.calibracion({
-    required this.id,
-    required this.titulo,
-    required this.ayuda,
-    required this.calibradorMm,
-    this.opcional = false,
-  })  : preferLateral = false,
-        esCalibracion = true;
-}
-
-class _MedicionPainter extends CustomPainter {
+class _AnotacionPainter extends CustomPainter {
   final Rect imageRect;
   final Size imageSize;
-  final List<Offset> points;
-  final Color color;
+  final Map<String, List<Offset>> puntosTodos;
+  final String? seleccionado;
+  final Color colorRef;
+  final Color colorMed;
 
-  const _MedicionPainter({
+  const _AnotacionPainter({
     required this.imageRect,
     required this.imageSize,
-    required this.points,
-    required this.color,
+    required this.puntosTodos,
+    required this.seleccionado,
+    required this.colorRef,
+    required this.colorMed,
   });
 
   Offset _toScreen(Offset p) => Offset(
@@ -800,32 +819,41 @@ class _MedicionPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final stroke = Paint()
-      ..color = color
-      ..strokeWidth = 2.2
-      ..style = PaintingStyle.stroke;
-    final fill = Paint()
-      ..color = color
-      ..style = PaintingStyle.fill;
-    final halo = Paint()
-      ..color = Colors.black.withOpacity(0.45)
-      ..style = PaintingStyle.fill;
+    for (final entry in puntosTodos.entries) {
+      final pts = entry.value;
+      if (pts.isEmpty) continue;
+      final isRef = _kRefMm.containsKey(entry.key);
+      final color = isRef ? colorRef : colorMed;
+      final selected = entry.key == seleccionado;
 
-    if (points.length == 2) {
-      canvas.drawLine(_toScreen(points[0]), _toScreen(points[1]), stroke);
-    }
-    for (final p in points) {
-      final s = _toScreen(p);
-      canvas.drawCircle(s, 8, halo);
-      canvas.drawCircle(s, 5, fill);
+      final stroke = Paint()
+        ..color = color.withOpacity(selected ? 1.0 : 0.7)
+        ..strokeWidth = selected ? 2.5 : 1.8
+        ..style = PaintingStyle.stroke;
+      final fill = Paint()
+        ..color = color
+        ..style = PaintingStyle.fill;
+      final halo = Paint()
+        ..color = Colors.black.withOpacity(0.5)
+        ..style = PaintingStyle.fill;
+
+      if (pts.length == 2) {
+        canvas.drawLine(_toScreen(pts[0]), _toScreen(pts[1]), stroke);
+      }
+      for (final p in pts) {
+        final s = _toScreen(p);
+        canvas.drawCircle(s, 8, halo);
+        canvas.drawCircle(s, 5, fill);
+      }
     }
   }
 
   @override
-  bool shouldRepaint(covariant _MedicionPainter oldDelegate) =>
-      oldDelegate.points != points ||
-      oldDelegate.imageRect != imageRect ||
-      oldDelegate.imageSize != imageSize;
+  bool shouldRepaint(covariant _AnotacionPainter old) =>
+      old.puntosTodos != puntosTodos ||
+      old.seleccionado != seleccionado ||
+      old.imageRect != imageRect ||
+      old.imageSize != imageSize;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
