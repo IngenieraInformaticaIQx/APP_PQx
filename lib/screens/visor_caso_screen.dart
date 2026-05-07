@@ -77,6 +77,8 @@ class CasoMedico {
   final String fechaOp;
   final String estado;
   final List<GlbArchivo> biomodelos;
+  final List<GlbArchivo> pre;
+  final List<GlbArchivo> post;
   final List<GrupoPlagas> placas;
   final List<GrupoTornillos> tornillos;
 
@@ -87,6 +89,8 @@ class CasoMedico {
     required this.fechaOp,
     required this.estado,
     required this.biomodelos,
+    this.pre  = const [],
+    this.post = const [],
     required this.placas,
     required this.tornillos,
   });
@@ -94,8 +98,14 @@ class CasoMedico {
   List<GlbArchivo> get todosGlb {
     final lista = <GlbArchivo>[...biomodelos];
     for (final g in placas) lista.addAll(g.placas);
+    lista.addAll(pre);
+    lista.addAll(post);
     return lista;
   }
+
+  int get _placasCount => placas.fold(0, (s, g) => s + g.placas.length);
+  int get preStartIdx  => biomodelos.length + _placasCount;
+  int get postStartIdx => preStartIdx + pre.length;
 
   List<GlbArchivo> get todosTornillos {
     final lista = <GlbArchivo>[];
@@ -110,6 +120,12 @@ class CasoMedico {
         fechaOp:    j['fecha_op'] ?? '',
         estado:     j['estado']   ?? 'pendiente',
         biomodelos: (j['biomodelos'] as List? ?? [])
+            .map((e) => GlbArchivo.fromJson(e, 'biomodelo'))
+            .toList(),
+        pre: (j['pre'] as List? ?? [])
+            .map((e) => GlbArchivo.fromJson(e, 'biomodelo'))
+            .toList(),
+        post: (j['post'] as List? ?? [])
             .map((e) => GlbArchivo.fromJson(e, 'biomodelo'))
             .toList(),
         placas: (j['placas'] as List? ?? [])
@@ -127,6 +143,16 @@ class CasoMedico {
     'fecha_op':   fechaOp,
     'estado':     estado,
     'biomodelos': biomodelos.map((e) => {
+      'nombre':  e.nombre,
+      'archivo': e.archivo,
+      'url':     e.url,
+    }).toList(),
+    'pre': pre.map((e) => {
+      'nombre':  e.nombre,
+      'archivo': e.archivo,
+      'url':     e.url,
+    }).toList(),
+    'post': post.map((e) => {
       'nombre':  e.nombre,
       'archivo': e.archivo,
       'url':     e.url,
@@ -318,7 +344,9 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
 
   final Map<int, String>              _glbCache          = {};
   final Map<int, bool>                _grupoExpandido    = {};
-  bool _bioExpanded = false; // grupo biomodelos colapsable
+  bool _bioExpanded  = false;
+  bool _preExpanded  = false;
+  bool _postExpanded = false;
   final Map<int, double>              _opacidades        = {};
   final Map<int, ValueNotifier<bool>> _cargandoNotifiers = {};
   final Map<int, String>              _catCache          = {};
@@ -1714,6 +1742,20 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
     return List.generate(n, (i) => i).every((i) => _visibles[i] == true);
   }
 
+  bool get _preTodosVisibles {
+    final start = widget.caso.preStartIdx;
+    final n = widget.caso.pre.length;
+    if (n == 0) return false;
+    return List.generate(n, (i) => start + i).every((i) => _visibles[i] == true);
+  }
+
+  bool get _postTodosVisibles {
+    final start = widget.caso.postStartIdx;
+    final n = widget.caso.post.length;
+    if (n == 0) return false;
+    return List.generate(n, (i) => start + i).every((i) => _visibles[i] == true);
+  }
+
   void _toggleBiomodelos() {
     final nuevo = !_bioTodosVisibles;
     final n = widget.caso.biomodelos.length;
@@ -1721,6 +1763,42 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
       for (int i = 0; i < n; i++) _visibles[i] = nuevo;
     });
     for (int i = 0; i < n; i++) {
+      if (nuevo) {
+        _glbCache.containsKey(i)
+            ? _jsRun("window.visor.cargarGlbBase64('glb_$i','${_glbCache[i]}');")
+            : (_visorListo ? _descargarYCargarGlb(i) : null);
+      } else {
+        _jsToggleGlb(i, false);
+      }
+    }
+  }
+
+  void _togglePre() {
+    final nuevo = !_preTodosVisibles;
+    final start = widget.caso.preStartIdx;
+    final n = widget.caso.pre.length;
+    setState(() {
+      for (int i = start; i < start + n; i++) _visibles[i] = nuevo;
+    });
+    for (int i = start; i < start + n; i++) {
+      if (nuevo) {
+        _glbCache.containsKey(i)
+            ? _jsRun("window.visor.cargarGlbBase64('glb_$i','${_glbCache[i]}');")
+            : (_visorListo ? _descargarYCargarGlb(i) : null);
+      } else {
+        _jsToggleGlb(i, false);
+      }
+    }
+  }
+
+  void _togglePost() {
+    final nuevo = !_postTodosVisibles;
+    final start = widget.caso.postStartIdx;
+    final n = widget.caso.post.length;
+    setState(() {
+      for (int i = start; i < start + n; i++) _visibles[i] = nuevo;
+    });
+    for (int i = start; i < start + n; i++) {
       if (nuevo) {
         _glbCache.containsKey(i)
             ? _jsRun("window.visor.cargarGlbBase64('glb_$i','${_glbCache[i]}');")
@@ -1841,6 +1919,7 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
 </style>
 </head>
 <body>
+<!-- DISABLED: hint-overlay y touch-plate-modebar desactivados
 <div id="hint-overlay">
   <div class="hint-item"><span class="hi">☝️</span><span>mover</span></div>
   <div class="hint-sep"></div>
@@ -1858,6 +1937,7 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
   <button type="button" data-plate-mode="pend-sup"><span class="mode-ico">↑</span><span class="mode-lbl">Sup.</span></button>
   <button type="button" data-plate-mode="pend-inf"><span class="mode-ico">↓</span><span class="mode-lbl">Inf.</span></button>
 </div>
+-->
 <div id="loading"><div class="spinner"></div><span>Cargando modelo…</span></div>
 <div id="watermark"><div class="wm-nombre" id="wm-nombre"></div><div class="wm-paciente" id="wm-paciente"></div></div>
 <div id="orbes" style="position:fixed;inset:0;pointer-events:none;z-index:1;overflow:hidden;">
@@ -3599,18 +3679,19 @@ function _showTouchPlateModeBar(show){
   const bar = document.getElementById('touch-plate-modebar');
   if(!bar) return;
   bar.classList.toggle('visible', !!show && _isMob);
-  if(show && _isMob) _setTouchPlateMode(_touchPlateMode);
+  // if(show && _isMob) _setTouchPlateMode(_touchPlateMode); // DISABLED
 }
 
-const _touchModeBarEl = document.getElementById('touch-plate-modebar');
-if(_touchModeBarEl){
-  _touchModeBarEl.addEventListener('pointerdown', e=>{
-    e.preventDefault();
-    e.stopPropagation();
-    const btn = e.target.closest('button[data-plate-mode]');
-    if(btn) _setTouchPlateMode(btn.dataset.plateMode);
-  }, {passive:false});
-}
+// DISABLED: listener de modebar desactivado
+// const _touchModeBarEl = document.getElementById('touch-plate-modebar');
+// if(_touchModeBarEl){
+//   _touchModeBarEl.addEventListener('pointerdown', e=>{
+//     e.preventDefault();
+//     e.stopPropagation();
+//     const btn = e.target.closest('button[data-plate-mode]');
+//     if(btn) _setTouchPlateMode(btn.dataset.plateMode);
+//   }, {passive:false});
+// }
 
 // Activa el arrastre de placa desde coordenadas de pantalla (screenX, screenY).
 // Usado tanto por el long-press timer como por el tap de 2 dedos.
@@ -3705,11 +3786,11 @@ function _tryActivateDrag(screenX, screenY){
     _modoGiroZ = false; _giroZEsTop = false; _giroZPivot = null;
     _modoGiroY = false;
     _eliminarIndicadorFondo();
-    const initialMode = _esTop ? 'pend-sup' : _esBottom ? 'pend-inf' : 'move';
-    _actualizarPivotPenduloMovil(modelos[modelId]);
+    // const initialMode = _esTop ? 'pend-sup' : _esBottom ? 'pend-inf' : 'move'; // DISABLED
+    // _actualizarPivotPenduloMovil(modelos[modelId]); // DISABLED
     _setPlacaGlow(modelId, true, false);
-    _setTouchPlateMode(initialMode);
-    _showTouchPlateModeBar(true);
+    // _setTouchPlateMode(initialMode); // DISABLED
+    // _showTouchPlateModeBar(true); // DISABLED
     _justActivatedDrag = true; // ignorar el primer lift tras long-press
   }
   _postPlacaArrastrando(modelId, true);
@@ -3862,7 +3943,7 @@ renderer.domElement.addEventListener('pointerdown', e=>{
       const curPtrs = Array.from(_ptrMap.values());
       const curDist = Math.hypot(curPtrs[1].x-curPtrs[0].x, curPtrs[1].y-curPtrs[0].y);
       if(Math.abs(curDist - _tapInitDist) > 15) return; // está haciendo pinch, no tap
-      _tryActivateDrag(_tapMidX, _tapMidY);
+      // _tryActivateDrag(_tapMidX, _tapMidY); // DISABLED
     }, 250);
     return;
   }
@@ -3884,7 +3965,7 @@ renderer.domElement.addEventListener('pointerdown', e=>{
     _lastPointerX = e.clientX; _lastPointerY = e.clientY;
     _arrastrandoTimer = setTimeout(()=>{
       if(_arrastreMaxDist > 40){ _arrastrandoTimer=null; return; }
-      _tryActivateDrag(_lastPointerX, _lastPointerY);
+      // _tryActivateDrag(_lastPointerX, _lastPointerY); // DISABLED
     }, 600);
   }
 });
@@ -3953,7 +4034,7 @@ renderer.domElement.addEventListener('pointermove', e=>{
     // Profundidad: pinch (distancia entre dedos)
     const distCur = Math.hypot(pts[1].x-pts[0].x, pts[1].y-pts[0].y);
     if(_prevPinchDist > 0){
-      _moverPlacaProfundidad(_placaArrastrandoId, (distCur - _prevPinchDist) * 0.0065);
+      // _moverPlacaProfundidad(_placaArrastrandoId, (distCur - _prevPinchDist) * 0.0065); // DISABLED
     }
     _prevPinchDist = distCur;
 
@@ -4038,11 +4119,11 @@ renderer.domElement.addEventListener('pointermove', e=>{
   }
 });
 renderer.domElement.addEventListener('contextmenu', e=>e.preventDefault());
-// Rueda del ratón durante drag → profundidad (adelante/atrás)
+// Rueda del ratón durante drag → profundidad (adelante/atrás) — DISABLED
 renderer.domElement.addEventListener('wheel', e=>{
   if(!_placaArrastrandoId) return;
   e.preventDefault();
-  _moverPlacaProfundidad(_placaArrastrandoId, -e.deltaY * 0.002);
+  // _moverPlacaProfundidad(_placaArrastrandoId, -e.deltaY * 0.002); // DISABLED
 }, {passive:false});
 renderer.domElement.addEventListener('pointercancel', e=>{
   _ptrMap.delete(e.pointerId); _prevPtr.delete(e.pointerId);
@@ -4065,7 +4146,7 @@ renderer.domElement.addEventListener('pointerup', e=>{
     if(_twoFingerTimer){ clearTimeout(_twoFingerTimer); _twoFingerTimer=null; }
     if(_arrastrandoTimer){ clearTimeout(_arrastrandoTimer); _arrastrandoTimer=null; }
     const moved = Math.hypot(e.clientX - pointerDownX, e.clientY - pointerDownY);
-    if(moved <= DRAG_THRESHOLD && _handleMobileSelectedTap(e.clientX, e.clientY)) return;
+    // if(moved <= DRAG_THRESHOLD && _handleMobileSelectedTap(e.clientX, e.clientY)) return; // DISABLED
     needsRender = true;
     return;
   }
@@ -4410,7 +4491,7 @@ function _handleSingleTouchDrag(curTouch, prevTouch, modelo){
     if(_touchPlateMode === 'depth'){
       if(prevTouch){
         const dy = curTouch.y - prevTouch.y;
-        _moverPlacaProfundidad(_placaArrastrandoId, -dy * 0.006);
+        // _moverPlacaProfundidad(_placaArrastrandoId, -dy * 0.006); // DISABLED
       }
       return;
     }
@@ -4459,7 +4540,7 @@ function _handleSingleTouchDrag(curTouch, prevTouch, modelo){
 
     if(_touchPlateMode === 'pend'){
       if(prevTouch){
-        _actualizarPivotPenduloMovil(modelo);
+        // _actualizarPivotPenduloMovil(modelo); // DISABLED
         if(_giroYPivot){
           const dx = curTouch.x - prevTouch.x;
           const sensibilidad = 0.0018;
@@ -4485,7 +4566,7 @@ function _handleSingleTouchDrag(curTouch, prevTouch, modelo){
 
     if(_touchPlateMode === 'pend-inf'){
       if(prevTouch){
-        _actualizarPivotPenduloVerticalMovilSup(modelo);
+        // _actualizarPivotPenduloVerticalMovilSup(modelo); // DISABLED
         if(_giroZPivot){
           const dx = curTouch.x - prevTouch.x;
           const sensibilidad = 0.0014;
@@ -4511,7 +4592,7 @@ function _handleSingleTouchDrag(curTouch, prevTouch, modelo){
 
     if(_touchPlateMode === 'pend-sup'){
       if(prevTouch){
-        _actualizarPivotPenduloVerticalMovil(modelo);
+        // _actualizarPivotPenduloVerticalMovil(modelo); // DISABLED
         if(_giroZPivot){
           const dx = curTouch.x - prevTouch.x;
           const sensibilidad = 0.0014;
@@ -4629,7 +4710,7 @@ function _handleMultiTouchDrag(curTouches, modelo){
 
   const distCur = Math.hypot(curTouches[1].x-curTouches[0].x, curTouches[1].y-curTouches[0].y);
   if(_prevPinchDistTouch > 0){
-    _moverPlacaProfundidad(_placaArrastrandoId, (distCur-_prevPinchDistTouch)*0.0065);
+    // _moverPlacaProfundidad(_placaArrastrandoId, (distCur-_prevPinchDistTouch)*0.0065); // DISABLED
   }
   _prevPinchDistTouch = distCur;
 
@@ -4663,7 +4744,7 @@ renderer.domElement.addEventListener('touchstart', e=>{
       const cur = _prevTouchSnapshot.slice(0,2);
       const curDist = Math.hypot(cur[1].x-cur[0].x, cur[1].y-cur[0].y);
       if(Math.abs(curDist - startDist) > 15) return;
-      _tryActivateDrag(startMidX, startMidY);
+      // _tryActivateDrag(startMidX, startMidY); // DISABLED
     }, 250);
   }
   if(e.touches.length === 1 && _placaArrastrandoId){
@@ -4682,7 +4763,7 @@ renderer.domElement.addEventListener('touchstart', e=>{
   _touchDragTimer = setTimeout(()=>{
     _touchDragTimer = null;
     if(_placaArrastrandoId) return; // ya activado por otro camino
-    _tryActivateDrag(_touchDragStartX, _touchDragStartY);
+    // _tryActivateDrag(_touchDragStartX, _touchDragStartY); // DISABLED
   }, 600);
   _prevTouchSnapshot = _snapshotTouches(e.touches);
 }, {passive:false});
@@ -4730,10 +4811,10 @@ renderer.domElement.addEventListener('touchend', e=>{
   if(_placaArrastrandoId && e.touches.length===0 && _isIOS && e.changedTouches.length > 0){
     const t = e.changedTouches[0];
     const moved = Math.hypot(t.clientX - _touchDragStartX, t.clientY - _touchDragStartY);
-    if(moved <= DRAG_THRESHOLD) _handleMobileSelectedTap(t.clientX, t.clientY);
+    // if(moved <= DRAG_THRESHOLD) _handleMobileSelectedTap(t.clientX, t.clientY); // DISABLED
   }
   if(_placaArrastrandoId && e.touches.length===0 && !_isMob){
-    _finishPlacaDrag();
+    // _finishPlacaDrag(); // DISABLED
   }
   _prevTouchSnapshot = _snapshotTouches(e.touches);
 }, {passive:false});
@@ -4743,7 +4824,7 @@ renderer.domElement.addEventListener('touchcancel', e=>{
   _touchTwoFingerStart = null;
   _prevPinchDistTouch=0;
   if(_touchDragTimer){ clearTimeout(_touchDragTimer); _touchDragTimer=null; }
-  if(_placaArrastrandoId && e.touches.length===0 && !_isMob) _finishPlacaDrag();
+  // if(_placaArrastrandoId && e.touches.length===0 && !_isMob) _finishPlacaDrag(); // DISABLED
   _prevTouchSnapshot = _snapshotTouches(e.touches);
 }, {passive:false});
 animate();
@@ -6838,6 +6919,109 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
           ),
         ]),
       ),
+      // ── Grupo PRE ──────────────────────────────────────────────────────────
+      if (widget.caso.pre.isNotEmpty) ...[
+        _StaggerItem(key: const ValueKey('capas-pre'), index: 0, child: GestureDetector(
+          onTap: () => setState(() => _preExpanded = !_preExpanded),
+          child: Container(
+            margin: const EdgeInsets.fromLTRB(10, 6, 10, 2),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            decoration: BoxDecoration(
+              color: const Color(0xFF9C27B0).withOpacity(0.10),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: const Color(0xFF9C27B0).withOpacity(0.35)),
+            ),
+            child: Row(children: [
+              const Icon(Icons.folder_outlined, size: 13, color: Color(0xFF9C27B0)),
+              const SizedBox(width: 6),
+              Expanded(child: Text('PRE',
+                  style: const TextStyle(color: Color(0xFF9C27B0),
+                      fontSize: 11, fontWeight: FontWeight.w700))),
+              TextButton(
+                onPressed: () => _togglePre(),
+                style: TextButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  backgroundColor: const Color(0xFF9C27B0).withOpacity(0.15),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(20),
+                    side: const BorderSide(color: Color(0xFF9C27B0), width: 0.8),
+                  ),
+                ),
+                child: Text(
+                  _preTodosVisibles ? 'Ocultar' : 'Ver todo',
+                  style: const TextStyle(
+                    color: Color(0xFF9C27B0),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              Icon(_preExpanded ? Icons.expand_less : Icons.expand_more,
+                  size: 16, color: const Color(0xFF9C27B0).withOpacity(0.7)),
+            ]),
+          ),
+        )),
+        if (_preExpanded)
+          ...widget.caso.pre.asMap().entries.map((e) {
+            final idx = widget.caso.preStartIdx + e.key;
+            return _StaggerItem(key: ValueKey('capas-pre-${e.key}'), index: e.key + 1,
+                child: _capaItem(idx, e.value));
+          }),
+      ],
+      // ── Grupo POST ─────────────────────────────────────────────────────────
+      if (widget.caso.post.isNotEmpty) ...[
+        _StaggerItem(key: const ValueKey('capas-post'), index: 0, child: GestureDetector(
+          onTap: () => setState(() => _postExpanded = !_postExpanded),
+          child: Container(
+            margin: const EdgeInsets.fromLTRB(10, 6, 10, 2),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            decoration: BoxDecoration(
+              color: const Color(0xFF00897B).withOpacity(0.10),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: const Color(0xFF00897B).withOpacity(0.35)),
+            ),
+            child: Row(children: [
+              const Icon(Icons.folder_outlined, size: 13, color: Color(0xFF00897B)),
+              const SizedBox(width: 6),
+              Expanded(child: Text('POST',
+                  style: const TextStyle(color: Color(0xFF00897B),
+                      fontSize: 11, fontWeight: FontWeight.w700))),
+              TextButton(
+                onPressed: () => _togglePost(),
+                style: TextButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  backgroundColor: const Color(0xFF00897B).withOpacity(0.15),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(20),
+                    side: const BorderSide(color: Color(0xFF00897B), width: 0.8),
+                  ),
+                ),
+                child: Text(
+                  _postTodosVisibles ? 'Ocultar' : 'Ver todo',
+                  style: const TextStyle(
+                    color: Color(0xFF00897B),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              Icon(_postExpanded ? Icons.expand_less : Icons.expand_more,
+                  size: 16, color: const Color(0xFF00897B).withOpacity(0.7)),
+            ]),
+          ),
+        )),
+        if (_postExpanded)
+          ...widget.caso.post.asMap().entries.map((e) {
+            final idx = widget.caso.postStartIdx + e.key;
+            return _StaggerItem(key: ValueKey('capas-post-${e.key}'), index: e.key + 1,
+                child: _capaItem(idx, e.value));
+          }),
+      ],
+      // ── Grupo Biomodelos ───────────────────────────────────────────────────
       if (widget.caso.biomodelos.isNotEmpty) ...[
         // Grupo Biomodelos colapsable
         _StaggerItem(key: ValueKey('capas-bio'), index: 0, child: GestureDetector(
@@ -6856,22 +7040,24 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
               Expanded(child: Text('Biomodelos',
                   style: TextStyle(color: _C.accentBone,
                       fontSize: 11, fontWeight: FontWeight.w700))),
-              // Botón Ver todo / Ocultar todo — solo actúa sobre biomodelos
-              GestureDetector(
-                onTap: () {
-                  _toggleBiomodelos();
-                  if (!_bioExpanded) setState(() => _bioExpanded = true);
-                },
-                behavior: HitTestBehavior.opaque,
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                  child: Text(
-                    _bioTodosVisibles ? 'Ocultar' : 'Ver todo',
-                    style: TextStyle(
-                      color: _C.accentBone.withOpacity(0.85),
-                      fontSize: 9,
-                      fontWeight: FontWeight.w700,
-                    ),
+              TextButton(
+                onPressed: () => _toggleBiomodelos(),
+                style: TextButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  backgroundColor: _C.accentBone.withOpacity(0.15),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(20),
+                    side: BorderSide(color: _C.accentBone, width: 0.8),
+                  ),
+                ),
+                child: Text(
+                  _bioTodosVisibles ? 'Ocultar' : 'Ver todo',
+                  style: TextStyle(
+                    color: _C.accentBone,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
                   ),
                 ),
               ),
