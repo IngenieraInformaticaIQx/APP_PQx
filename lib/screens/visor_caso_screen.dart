@@ -70,17 +70,54 @@ class GrupoTornillos {
       );
 }
 
+// ── Carpetas dinámicas (reemplaza pre/post hardcodeados) ──────────────────
+
+class SubgrupoGlb {
+  final String nombre;   // "" = raíz de la carpeta
+  final List<GlbArchivo> archivos;
+  const SubgrupoGlb({required this.nombre, required this.archivos});
+  factory SubgrupoGlb.fromJson(Map<String, dynamic> j) => SubgrupoGlb(
+        nombre:   j['nombre']   as String? ?? '',
+        archivos: (j['archivos'] as List? ?? [])
+            .map((e) => GlbArchivo.fromJson(e as Map<String, dynamic>, 'biomodelo'))
+            .toList(),
+      );
+  Map<String, dynamic> toJson() => {
+    'nombre': nombre,
+    'archivos': archivos.map((e) => {'nombre': e.nombre, 'archivo': e.archivo, 'url': e.url}).toList(),
+  };
+}
+
+class CarpetaGlb {
+  final String nombre;
+  final List<SubgrupoGlb> grupos;
+  const CarpetaGlb({required this.nombre, required this.grupos});
+
+  List<GlbArchivo> get todosArchivos =>
+      grupos.expand((g) => g.archivos).toList();
+
+  factory CarpetaGlb.fromJson(Map<String, dynamic> j) => CarpetaGlb(
+        nombre: j['nombre'] as String? ?? '',
+        grupos: (j['grupos'] as List? ?? [])
+            .map((g) => SubgrupoGlb.fromJson(g as Map<String, dynamic>))
+            .toList(),
+      );
+  Map<String, dynamic> toJson() => {
+    'nombre': nombre,
+    'grupos': grupos.map((g) => g.toJson()).toList(),
+  };
+}
+
 class CasoMedico {
   final String id;
   final String nombre;
   final String paciente;
   final String fechaOp;
   final String estado;
-  final List<GlbArchivo> biomodelos;
-  final List<GlbArchivo> pre;
-  final List<GlbArchivo> post;
-  final List<GrupoPlagas> placas;
+  final List<GlbArchivo>    biomodelos;
+  final List<GrupoPlagas>   placas;
   final List<GrupoTornillos> tornillos;
+  final List<CarpetaGlb>   carpetas;   // carpetas dinámicas (antes pre/post)
 
   const CasoMedico({
     required this.id,
@@ -89,23 +126,26 @@ class CasoMedico {
     required this.fechaOp,
     required this.estado,
     required this.biomodelos,
-    this.pre  = const [],
-    this.post = const [],
     required this.placas,
     required this.tornillos,
+    this.carpetas = const [],
   });
 
   List<GlbArchivo> get todosGlb {
     final lista = <GlbArchivo>[...biomodelos];
     for (final g in placas) lista.addAll(g.placas);
-    lista.addAll(pre);
-    lista.addAll(post);
+    for (final c in carpetas) lista.addAll(c.todosArchivos);
     return lista;
   }
 
-  int get _placasCount => placas.fold(0, (s, g) => s + g.placas.length);
-  int get preStartIdx  => biomodelos.length + _placasCount;
-  int get postStartIdx => preStartIdx + pre.length;
+  int get _placasCount     => placas.fold(0, (s, g) => s + g.placas.length);
+  int get carpetasStartIdx => biomodelos.length + _placasCount;
+
+  int carpetaStartIdx(int ci) {
+    int idx = carpetasStartIdx;
+    for (int i = 0; i < ci; i++) idx += carpetas[i].todosArchivos.length;
+    return idx;
+  }
 
   List<GlbArchivo> get todosTornillos {
     final lista = <GlbArchivo>[];
@@ -113,28 +153,60 @@ class CasoMedico {
     return lista;
   }
 
-  factory CasoMedico.fromJson(Map<String, dynamic> j) => CasoMedico(
-        id:         j['id']       ?? '',
-        nombre:     j['nombre']   ?? j['id'] ?? '',
-        paciente:   j['paciente'] ?? '',
-        fechaOp:    j['fecha_op'] ?? '',
-        estado:     j['estado']   ?? 'pendiente',
-        biomodelos: (j['biomodelos'] as List? ?? [])
-            .map((e) => GlbArchivo.fromJson(e, 'biomodelo'))
-            .toList(),
-        pre: (j['pre'] as List? ?? [])
-            .map((e) => GlbArchivo.fromJson(e, 'biomodelo'))
-            .toList(),
-        post: (j['post'] as List? ?? [])
-            .map((e) => GlbArchivo.fromJson(e, 'biomodelo'))
-            .toList(),
-        placas: (j['placas'] as List? ?? [])
-            .map((e) => GrupoPlagas.fromJson(e))
-            .toList(),
-        tornillos: (j['tornillos'] as List? ?? [])
-            .map((e) => GrupoTornillos.fromJson(e))
-            .toList(),
-      );
+  factory CasoMedico.fromJson(Map<String, dynamic> j) {
+    // Formato nuevo: array "carpetas"
+    final carpetasRaw = j['carpetas'] as List?;
+    List<CarpetaGlb> carpetas;
+    if (carpetasRaw != null) {
+      carpetas = carpetasRaw
+          .map((c) => CarpetaGlb.fromJson(c as Map<String, dynamic>))
+          .toList();
+    } else {
+      // Compatibilidad con formato antiguo: pre / post planos
+      carpetas = [];
+      final preList = j['pre'] as List? ?? [];
+      if (preList.isNotEmpty) {
+        carpetas.add(CarpetaGlb(
+          nombre: 'pre',
+          grupos: [SubgrupoGlb(
+            nombre: '',
+            archivos: preList
+                .map((e) => GlbArchivo.fromJson(e as Map<String, dynamic>, 'biomodelo'))
+                .toList(),
+          )],
+        ));
+      }
+      final postList = j['post'] as List? ?? [];
+      if (postList.isNotEmpty) {
+        carpetas.add(CarpetaGlb(
+          nombre: 'post',
+          grupos: [SubgrupoGlb(
+            nombre: '',
+            archivos: postList
+                .map((e) => GlbArchivo.fromJson(e as Map<String, dynamic>, 'biomodelo'))
+                .toList(),
+          )],
+        ));
+      }
+    }
+    return CasoMedico(
+      id:         j['id']       ?? '',
+      nombre:     j['nombre']   ?? j['id'] ?? '',
+      paciente:   j['paciente'] ?? '',
+      fechaOp:    j['fecha_op'] ?? '',
+      estado:     j['estado']   ?? 'pendiente',
+      biomodelos: (j['biomodelos'] as List? ?? [])
+          .map((e) => GlbArchivo.fromJson(e as Map<String, dynamic>, 'biomodelo'))
+          .toList(),
+      placas: (j['placas'] as List? ?? [])
+          .map((e) => GrupoPlagas.fromJson(e as Map<String, dynamic>))
+          .toList(),
+      tornillos: (j['tornillos'] as List? ?? [])
+          .map((e) => GrupoTornillos.fromJson(e as Map<String, dynamic>))
+          .toList(),
+      carpetas: carpetas,
+    );
+  }
 
   Map<String, dynamic> toJson() => {
     'id':         id,
@@ -142,37 +214,16 @@ class CasoMedico {
     'paciente':   paciente,
     'fecha_op':   fechaOp,
     'estado':     estado,
-    'biomodelos': biomodelos.map((e) => {
-      'nombre':  e.nombre,
-      'archivo': e.archivo,
-      'url':     e.url,
-    }).toList(),
-    'pre': pre.map((e) => {
-      'nombre':  e.nombre,
-      'archivo': e.archivo,
-      'url':     e.url,
-    }).toList(),
-    'post': post.map((e) => {
-      'nombre':  e.nombre,
-      'archivo': e.archivo,
-      'url':     e.url,
-    }).toList(),
+    'biomodelos': biomodelos.map((e) => {'nombre': e.nombre, 'archivo': e.archivo, 'url': e.url}).toList(),
     'placas': placas.map((g) => {
       'nombre': g.nombre,
-      'placas': g.placas.map((e) => {
-        'nombre':  e.nombre,
-        'archivo': e.archivo,
-        'url':     e.url,
-      }).toList(),
+      'placas': g.placas.map((e) => {'nombre': e.nombre, 'archivo': e.archivo, 'url': e.url}).toList(),
     }).toList(),
     'tornillos': tornillos.map((g) => {
       'nombre': g.nombre,
-      'tornillos': g.tornillos.map((e) => {
-        'nombre':  e.nombre,
-        'archivo': e.archivo,
-        'url':     e.url,
-      }).toList(),
+      'tornillos': g.tornillos.map((e) => {'nombre': e.nombre, 'archivo': e.archivo, 'url': e.url}).toList(),
     }).toList(),
+    'carpetas': carpetas.map((c) => c.toJson()).toList(),
   };
 }
 
@@ -346,8 +397,8 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
   final Map<int, String>              _glbCache          = {};
   final Map<int, bool>                _grupoExpandido    = {};
   bool _bioExpanded  = false;
-  bool _preExpanded  = false;
-  bool _postExpanded = false;
+  final Map<int, bool> _carpetaSecExpandida = {}; // carpeta index → expanded
+  final Map<String, bool> _subgrupoExpandido = {}; // "$ci-$gi" → expanded
   final Map<int, double>              _opacidades        = {};
   final Map<int, ValueNotifier<bool>> _cargandoNotifiers = {};
   final Map<int, String>              _catCache          = {};
@@ -509,6 +560,11 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
     }
     for (int i = 0; i < widget.caso.placas.length; i++)
       _grupoExpandido[i] = false;
+    for (int i = 0; i < widget.caso.carpetas.length; i++) {
+      _carpetaSecExpandida[i] = false;
+      for (int j = 0; j < widget.caso.carpetas[i].grupos.length; j++)
+        _subgrupoExpandido['$i-$j'] = false;
+    }
     for (int i = 0; i < widget.caso.todosGlb.length; i++) {
       _opacidades[i] = 1.0;
       _cargandoNotifiers[i] = ValueNotifier(false);
@@ -534,9 +590,9 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
           }
           _jsRun('window.visor.setBackground(${AppTheme.isDark.value});');
 
-          final numBio = widget.caso.biomodelos.length;
-          _jsRun('window._numBiomodelos = $numBio;');
-          _jsRun('window._preStartIdx = ${widget.caso.preStartIdx};');
+          _jsRun('window._numBiomodelos = ${widget.caso.biomodelos.length};');
+          _jsRun('window._carpetasStartIdx = ${widget.caso.carpetasStartIdx};');
+          _jsRun('window._huesoIndices = ${_calcularHuesoIndices()};');
           _jsRun('window._showRxDimensions = ${_mostrarCotasRx ? 'true' : 'false'};');
 
           final nombreEsc = widget.caso.nombre.replaceAll("'", "");
@@ -753,9 +809,9 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
     if (!mounted) return;
     setState(() => _visorListo = true);
     _jsRun('window.visor.setBackground(${AppTheme.isDark.value});');
-    final numBio = widget.caso.biomodelos.length;
-    _jsRun('window._numBiomodelos = $numBio;');
-    _jsRun('window._preStartIdx = ${widget.caso.preStartIdx};');
+    _jsRun('window._numBiomodelos = ${widget.caso.biomodelos.length};');
+    _jsRun('window._carpetasStartIdx = ${widget.caso.carpetasStartIdx};');
+    _jsRun('window._huesoIndices = ${_calcularHuesoIndices()};');
     _jsRun('window._showRxDimensions = ${_mostrarCotasRx ? 'true' : 'false'};');
     final nombreEsc = widget.caso.nombre.replaceAll("'", "");
     final pacienteEsc = widget.caso.paciente.replaceAll("'", "");
@@ -1745,16 +1801,9 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
     return List.generate(n, (i) => i).every((i) => _visibles[i] == true);
   }
 
-  bool get _preTodosVisibles {
-    final start = widget.caso.preStartIdx;
-    final n = widget.caso.pre.length;
-    if (n == 0) return false;
-    return List.generate(n, (i) => start + i).every((i) => _visibles[i] == true);
-  }
-
-  bool get _postTodosVisibles {
-    final start = widget.caso.postStartIdx;
-    final n = widget.caso.post.length;
+  bool _carpetaTodosVisibles(int ci) {
+    final start = widget.caso.carpetaStartIdx(ci);
+    final n = widget.caso.carpetas[ci].todosArchivos.length;
     if (n == 0) return false;
     return List.generate(n, (i) => start + i).every((i) => _visibles[i] == true);
   }
@@ -1776,10 +1825,24 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
     }
   }
 
-  void _togglePre() {
-    final nuevo = !_preTodosVisibles;
-    final start = widget.caso.preStartIdx;
-    final n = widget.caso.pre.length;
+  /// Índices GLB que responden al xray: biomodelos + carpetas llamadas "biomodelos"
+  String _calcularHuesoIndices() {
+    final indices = <int>[];
+    for (int i = 0; i < widget.caso.biomodelos.length; i++) indices.add(i);
+    for (int ci = 0; ci < widget.caso.carpetas.length; ci++) {
+      if (widget.caso.carpetas[ci].nombre.toLowerCase() == 'biomodelos') {
+        final start = widget.caso.carpetaStartIdx(ci);
+        final n = widget.caso.carpetas[ci].todosArchivos.length;
+        for (int i = start; i < start + n; i++) indices.add(i);
+      }
+    }
+    return indices.toString(); // [0,1,2,...] válido como array JS
+  }
+
+  void _toggleCarpeta(int ci) {
+    final nuevo = !_carpetaTodosVisibles(ci);
+    final start = widget.caso.carpetaStartIdx(ci);
+    final n = widget.caso.carpetas[ci].todosArchivos.length;
     setState(() {
       for (int i = start; i < start + n; i++) _visibles[i] = nuevo;
     });
@@ -1794,14 +1857,19 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
     }
   }
 
-  void _togglePost() {
-    final nuevo = !_postTodosVisibles;
-    final start = widget.caso.postStartIdx;
-    final n = widget.caso.post.length;
+  bool _subgrupoTodosVisibles(int ci, int gi, int startIdx) {
+    final n = widget.caso.carpetas[ci].grupos[gi].archivos.length;
+    if (n == 0) return false;
+    return List.generate(n, (i) => startIdx + i).every((i) => _visibles[i] == true);
+  }
+
+  void _toggleSubgrupo(int ci, int gi, int startIdx) {
+    final nuevo = !_subgrupoTodosVisibles(ci, gi, startIdx);
+    final n = widget.caso.carpetas[ci].grupos[gi].archivos.length;
     setState(() {
-      for (int i = start; i < start + n; i++) _visibles[i] = nuevo;
+      for (int i = startIdx; i < startIdx + n; i++) _visibles[i] = nuevo;
     });
-    for (int i = start; i < start + n; i++) {
+    for (int i = startIdx; i < startIdx + n; i++) {
       if (nuevo) {
         _glbCache.containsKey(i)
             ? _jsRun("window.visor.cargarGlbBase64('glb_$i','${_glbCache[i]}');")
@@ -2523,10 +2591,8 @@ function cargarGlbBase64(id, b64){
   try{
     loader.parse(b64ToBuffer(b64),'', gltf=>{
       const _idx = parseInt(id.replace('glb_',''));
-      const esHueso = id.startsWith('glb_') && (
-        _idx < window._numBiomodelos ||
-        (window._preStartIdx != null && _idx >= window._preStartIdx)
-      );
+      const esHueso = id.startsWith('glb_') &&
+        window._huesoIndices && window._huesoIndices.includes(_idx);
 
       // Detectar y guardar trayectorias (T1, T2...) — invisibles en escena
       gltf.scene.traverse(c=>{
@@ -3087,25 +3153,26 @@ function toggleTrayectoriasGlb(id, v){
   _invalidarCacheMeshes();
 }
 function setOpacidad(id,op){
-  VisorLog.postMessage('setOpacidad id='+id+' op='+op+' existe='+(!!modelos[id]));
   if(!modelos[id]) return;
-  let n=0;
   modelos[id].traverse(c=>{
     if(c.isMesh && !c.userData.esTrayectoria){
       const mats = Array.isArray(c.material) ? c.material : [c.material];
-      mats.forEach(m=>{ m.transparent=op<1; m.opacity=op; m.needsUpdate=true; n++; });
+      mats.forEach(m=>{ m.transparent=op<1; m.opacity=op; m.needsUpdate=true; });
     }
   });
-  VisorLog.postMessage('setOpacidad meshes='+n+' needsRender=true');
   needsRender = true;
 }
 function setAutoRotate(v){ controls.autoRotate=v; controls.autoRotateSpeed=1.5; needsRender = true; }
 
 // ── Modo Rayos X: transparenta todos los huesos ──────────────────────────
 function setXray(op){
+  const nBio = window._numBiomodelos || 0;
+  if(nBio === 0) return;
   for(const id in modelos){
     const m = modelos[id];
-    if(!m || !m.userData.esHueso) continue;
+    if(!m) continue;
+    const _idx = parseInt(id.replace('glb_',''));
+    if(_idx >= nBio) continue;
     m.traverse(c=>{
       if(c.isMesh && !c.userData.esTornillo){
         const mats = Array.isArray(c.material) ? c.material : [c.material];
@@ -4835,8 +4902,9 @@ window.addEventListener('resize',()=>{
   outlinePass.resolution.set(innerWidth,innerHeight);
   needsRender = true;
 });
-window._numBiomodelos = 0; // se sobreescribe desde Flutter antes de cargar GLBs
-window._preStartIdx = null;  // se sobreescribe desde Flutter; null = sin carpetas pre/post
+window._numBiomodelos = 0;
+window._carpetasStartIdx = null;
+window._huesoIndices = []; // índices GLB que responden al xray; se sobreescribe desde Flutter
 window._showRxDimensions = false; // true solo en flujo de radiografia
 setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorReady.postMessage('ready'); },500);
 </script>
@@ -5050,7 +5118,7 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
                 top: 64, left: 0, right: 0, bottom: 62,
                 child: GestureDetector(
                   behavior: HitTestBehavior.translucent,
-                  onTap: () => setState(() => _panelAbierto = false),
+                  onDoubleTap: () => setState(() => _panelAbierto = false),
                 ),
               ),
             _buildBtnLimpiar(),
@@ -6497,43 +6565,42 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
       ...widget.caso.biomodelos,
       ...widget.caso.placas.expand((g) => g.placas),
       ...widget.caso.tornillos.expand((g) => g.tornillos),
+      ...widget.caso.carpetas.expand((c) => c.todosArchivos),
     ];
     if (todosGlb.isEmpty) { _sinDocumentacion(); return; }
 
-    // Derivar carpeta relativa del caso desde la URL del primer GLB
+    // Derivar carpeta raíz del caso: siempre 3D/{uid}/{caso}
     final uri = Uri.parse(todosGlb.first.url);
     final segments = uri.pathSegments;
-    if (segments.length < 2) { _sinDocumentacion(); return; }
-    // Ruta relativa desde public_html/profesional/ → carpeta raíz del caso + documentacion
-    final casoRelPath = segments.take(segments.length - 2).join('/');
-    final carpetaParam = Uri.encodeComponent('$casoRelPath/documentacion');
+    if (segments.length < 3) { _sinDocumentacion(); return; }
+    final casoRelPath = segments.take(3).join('/');
 
     final prefs = await SharedPreferences.getInstance();
     final email    = prefs.getString('login_email')    ?? '';
     final password = prefs.getString('login_password') ?? '';
     final credentials = base64Encode(utf8.encode('$email:$password'));
 
-    final apiUrl = 'https://profesional.planificacionquirurgica.com/listar_docs.php?carpeta=$carpetaParam';
-    debugPrint('📄 PDF apiUrl: $apiUrl');
-
+    // Intenta primero minúscula, luego mayúscula
     List<String> pdfs = [];
-    try {
-      final resp = await http.get(
-        Uri.parse(apiUrl),
-        headers: {'Authorization': 'Basic $credentials'},
-      ).timeout(const Duration(seconds: 10));
-
-      debugPrint('📄 PDF status: ${resp.statusCode} body: ${resp.body}');
-
-      if (resp.statusCode == 200) {
-        final data = jsonDecode(resp.body) as Map<String, dynamic>;
-        pdfs = List<String>.from(data['pdfs'] ?? []);
-      }
-    } catch (e) { debugPrint('📄 PDF error: $e'); }
+    String nombreDoc = 'documentacion';
+    for (final nombre in ['documentacion', 'Documentacion']) {
+      final carpetaParam = Uri.encodeComponent('$casoRelPath/$nombre');
+      final apiUrl = 'https://profesional.planificacionquirurgica.com/listar_docs.php?carpeta=$carpetaParam';
+      try {
+        final resp = await http.get(
+          Uri.parse(apiUrl),
+          headers: {'Authorization': 'Basic $credentials'},
+        ).timeout(const Duration(seconds: 10));
+        if (resp.statusCode == 200) {
+          final data = jsonDecode(resp.body) as Map<String, dynamic>;
+          final lista = List<String>.from(data['pdfs'] ?? []);
+          if (lista.isNotEmpty) { pdfs = lista; nombreDoc = nombre; break; }
+        }
+      } catch (_) {}
+    }
 
     // URL base para construir enlaces directos a los PDFs
-    final rootPath = '/' + segments.take(segments.length - 2).join('/') + '/';
-    final docUrl = Uri.encodeFull(uri.scheme + '://' + uri.host + rootPath + 'documentacion/');
+    final docUrl = Uri.encodeFull('${uri.scheme}://${uri.host}/$casoRelPath/$nombreDoc/');
 
     if (pdfs.isEmpty) { _sinDocumentacion(); return; }
     if (!mounted) return;
@@ -6760,7 +6827,7 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
   Widget _buildPanelLateral() {
     final size    = MediaQuery.of(context).size;
     final padding = MediaQuery.of(context).padding;
-    if (_panelLeftOffset < 0) _panelLeftOffset = size.width - 260 - 12;
+    if (_panelLeftOffset < 0) _panelLeftOffset = size.width - 290 - 12;
 
     final bool medidasActivas = (_placaArrastrandoActiva || _placaDesplazamiento.tieneDesplazamiento) && !_medidasMinimizado;
     // medidas panel: top 72 + ~46px contenido + 18px margen
@@ -6799,7 +6866,7 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
             );
             _panelLeftOffset = (_panelLeftOffset + delta.dx).clamp(
               8.0,
-              size.width - 260 - 8.0,
+              size.width - 290 - 8.0,
             );
           });
         },
@@ -6808,12 +6875,11 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
           setState(() => _panelArrastrando = false);
         },
         onLongPressCancel: () => setState(() => _panelArrastrando = false),
-        onTap: () => setState(() => _panelAbierto = false),
         onDoubleTap: () {
           HapticFeedback.lightImpact();
           setState(() {
             _panelTopOffset  = minPanelTop;
-            _panelLeftOffset = size.width - 260 - 12;
+            _panelLeftOffset = size.width - 290 - 12;
             _panelHeight     = 680.0;
           });
         },
@@ -6834,7 +6900,7 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
               child: BackdropFilter(
                 filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
                 child: Container(
-                  width: 260,
+                  width: 290,
                   height: displayPanelHeight,
                   decoration: BoxDecoration(
                     color: AppTheme.cardBg1,
@@ -6883,7 +6949,7 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
                 });
               },
               child: Container(
-                width: 260,
+                width: 290,
                 height: 20,
                 color: Colors.transparent,
                 child: Center(
@@ -6979,108 +7045,146 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
           ),
         ]),
       ),
-      // ── Grupo PRE ──────────────────────────────────────────────────────────
-      if (widget.caso.pre.isNotEmpty) ...[
-        _StaggerItem(key: const ValueKey('capas-pre'), index: 0, child: GestureDetector(
-          onTap: () => setState(() => _preExpanded = !_preExpanded),
-          child: Container(
-            margin: const EdgeInsets.fromLTRB(10, 6, 10, 2),
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-            decoration: BoxDecoration(
-              color: const Color(0xFF9C27B0).withOpacity(0.10),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: const Color(0xFF9C27B0).withOpacity(0.35)),
-            ),
-            child: Row(children: [
-              const Icon(Icons.folder_outlined, size: 13, color: Color(0xFF9C27B0)),
-              const SizedBox(width: 6),
-              Expanded(child: Text('PRE',
-                  style: const TextStyle(color: Color(0xFF9C27B0),
-                      fontSize: 11, fontWeight: FontWeight.w700))),
-              TextButton(
-                onPressed: () => _togglePre(),
-                style: TextButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  minimumSize: Size.zero,
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  backgroundColor: const Color(0xFF9C27B0).withOpacity(0.15),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(20),
-                    side: const BorderSide(color: Color(0xFF9C27B0), width: 0.8),
-                  ),
+      // ── Carpetas dinámicas (pre/post y cualquier otra carpeta del VPS) ────
+      ...widget.caso.carpetas.asMap().entries.expand((entry) {
+        final ci = entry.key;
+        final carpeta = entry.value;
+        final kColores = AppTheme.isDark.value ? [
+          const Color(0xFFFFB300), const Color(0xFF00E5FF), const Color(0xFF1565C0),
+          const Color(0xFFE65100), const Color(0xFF2E7D32), const Color(0xFFC62828),
+        ] : [
+          const Color(0xFF9C27B0), const Color(0xFF00897B), const Color(0xFF1565C0),
+          const Color(0xFFE65100), const Color(0xFF2E7D32), const Color(0xFFC62828),
+        ];
+        final color    = kColores[ci % kColores.length];
+        final expanded = _carpetaSecExpandida[ci] ?? false;
+        final todosVis = _carpetaTodosVisibles(ci);
+
+        final items = <Widget>[
+          _StaggerItem(
+            key: ValueKey('capas-carp-$ci'),
+            index: 0,
+            child: GestureDetector(
+              onTap: () => setState(() => _carpetaSecExpandida[ci] = !expanded),
+              child: Container(
+                margin: const EdgeInsets.fromLTRB(10, 6, 10, 2),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+                decoration: BoxDecoration(
+                  color: color.withOpacity(0.10),
+                  borderRadius: BorderRadius.circular(11),
+                  border: Border.all(color: color.withOpacity(0.35)),
                 ),
-                child: Text(
-                  _preTodosVisibles ? 'Ocultar' : 'Ver todo',
-                  style: const TextStyle(
-                    color: Color(0xFF9C27B0),
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
+                child: Row(children: [
+                  Icon(Icons.folder_outlined, size: 16, color: color),
+                  const SizedBox(width: 7),
+                  Expanded(child: Text(carpeta.nombre,
+                      style: TextStyle(color: color,
+                          fontSize: 14, fontWeight: FontWeight.w700))),
+                  TextButton(
+                    onPressed: () => _toggleCarpeta(ci),
+                    style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 12),
+                      minimumSize: Size.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      backgroundColor: color.withOpacity(0.15),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(20),
+                        side: BorderSide(color: color, width: 0.8),
+                      ),
+                    ),
+                    child: Text(
+                      todosVis ? 'Ocultar' : 'Ver todo',
+                      style: TextStyle(color: color,
+                          fontSize: 15, fontWeight: FontWeight.w700),
+                    ),
                   ),
-                ),
+                  Icon(expanded ? Icons.expand_less : Icons.expand_more,
+                      size: 16, color: color.withOpacity(0.7)),
+                ]),
               ),
-              Icon(_preExpanded ? Icons.expand_less : Icons.expand_more,
-                  size: 16, color: const Color(0xFF9C27B0).withOpacity(0.7)),
-            ]),
-          ),
-        )),
-        if (_preExpanded)
-          ...widget.caso.pre.asMap().entries.map((e) {
-            final idx = widget.caso.preStartIdx + e.key;
-            return _StaggerItem(key: ValueKey('capas-pre-${e.key}'), index: e.key + 1,
-                child: _capaItem(idx, e.value));
-          }),
-      ],
-      // ── Grupo POST ─────────────────────────────────────────────────────────
-      if (widget.caso.post.isNotEmpty) ...[
-        _StaggerItem(key: const ValueKey('capas-post'), index: 0, child: GestureDetector(
-          onTap: () => setState(() => _postExpanded = !_postExpanded),
-          child: Container(
-            margin: const EdgeInsets.fromLTRB(10, 6, 10, 2),
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-            decoration: BoxDecoration(
-              color: const Color(0xFF00897B).withOpacity(0.10),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: const Color(0xFF00897B).withOpacity(0.35)),
             ),
-            child: Row(children: [
-              const Icon(Icons.folder_outlined, size: 13, color: Color(0xFF00897B)),
-              const SizedBox(width: 6),
-              Expanded(child: Text('POST',
-                  style: const TextStyle(color: Color(0xFF00897B),
-                      fontSize: 11, fontWeight: FontWeight.w700))),
-              TextButton(
-                onPressed: () => _togglePost(),
-                style: TextButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  minimumSize: Size.zero,
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  backgroundColor: const Color(0xFF00897B).withOpacity(0.15),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(20),
-                    side: const BorderSide(color: Color(0xFF00897B), width: 0.8),
-                  ),
-                ),
-                child: Text(
-                  _postTodosVisibles ? 'Ocultar' : 'Ver todo',
-                  style: const TextStyle(
-                    color: Color(0xFF00897B),
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-              Icon(_postExpanded ? Icons.expand_less : Icons.expand_more,
-                  size: 16, color: const Color(0xFF00897B).withOpacity(0.7)),
-            ]),
           ),
-        )),
-        if (_postExpanded)
-          ...widget.caso.post.asMap().entries.map((e) {
-            final idx = widget.caso.postStartIdx + e.key;
-            return _StaggerItem(key: ValueKey('capas-post-${e.key}'), index: e.key + 1,
-                child: _capaItem(idx, e.value));
-          }),
-      ],
+        ];
+
+        if (expanded) {
+          int glbOffset = widget.caso.carpetaStartIdx(ci);
+          for (int gi = 0; gi < carpeta.grupos.length; gi++) {
+            final grupo = carpeta.grupos[gi];
+            // Subcabecera colapsable (solo si hay más de un grupo con nombre)
+            final bool mostrarSubhdr = carpeta.grupos.length > 1 && grupo.nombre.isNotEmpty;
+            final bool subExp = mostrarSubhdr
+                ? (_subgrupoExpandido['$ci-$gi'] ?? false)
+                : true; // sin subcabecera → siempre visible
+            final int subStart = glbOffset;
+
+            if (mostrarSubhdr) {
+              final bool subTodosVis = _subgrupoTodosVisibles(ci, gi, subStart);
+              // Color distinto al padre: desplazado 2 posiciones en la paleta
+              final subColor = kColores[(ci + 2) % kColores.length];
+              items.add(_StaggerItem(
+                key: ValueKey('capas-carp-$ci-grp-$gi'),
+                index: gi,
+                child: GestureDetector(
+                  onTap: () => setState(
+                      () => _subgrupoExpandido['$ci-$gi'] = !subExp),
+                  child: Container(
+                    margin: const EdgeInsets.fromLTRB(18, 4, 10, 1),
+                    padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
+                    decoration: BoxDecoration(
+                      color: subColor.withOpacity(0.06),
+                      borderRadius: BorderRadius.circular(9),
+                      border: Border.all(color: subColor.withOpacity(0.22)),
+                    ),
+                    child: Row(children: [
+                      Icon(Icons.folder_open, size: 14, color: subColor.withOpacity(0.75)),
+                      const SizedBox(width: 6),
+                      Expanded(child: Text(grupo.nombre, style: TextStyle(
+                          color: subColor.withOpacity(0.85),
+                          fontSize: 13, fontWeight: FontWeight.w600))),
+                      TextButton(
+                        onPressed: () => _toggleSubgrupo(ci, gi, subStart),
+                        style: TextButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                          minimumSize: Size.zero,
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          backgroundColor: subColor.withOpacity(0.12),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                            side: BorderSide(color: subColor.withOpacity(0.5), width: 0.7),
+                          ),
+                        ),
+                        child: Text(subTodosVis ? 'Ocultar' : 'Ver todo',
+                            style: TextStyle(color: subColor,
+                                fontSize: 13, fontWeight: FontWeight.w700)),
+                      ),
+                      const SizedBox(width: 4),
+                      AnimatedRotation(
+                        turns: subExp ? 0.5 : 0,
+                        duration: const Duration(milliseconds: 180),
+                        child: Icon(Icons.keyboard_arrow_down,
+                            size: 13, color: subColor.withOpacity(0.6)),
+                      ),
+                    ]),
+                  ),
+                ),
+              ));
+            }
+
+            if (subExp) {
+              for (int ai = 0; ai < grupo.archivos.length; ai++) {
+                final idx = glbOffset + ai;
+                items.add(_StaggerItem(
+                  key: ValueKey('capas-carp-$ci-$gi-$ai'),
+                  index: ai + 1,
+                  child: _capaItem(idx, grupo.archivos[ai]),
+                ));
+              }
+            }
+            glbOffset += grupo.archivos.length;
+          }
+        }
+        return items;
+      }),
       // ── Grupo Biomodelos ───────────────────────────────────────────────────
       if (widget.caso.biomodelos.isNotEmpty) ...[
         // Grupo Biomodelos colapsable
@@ -7088,22 +7192,22 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
           onTap: () => setState(() => _bioExpanded = !_bioExpanded),
           child: Container(
             margin: const EdgeInsets.fromLTRB(10, 6, 10, 2),
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
             decoration: BoxDecoration(
               color: _C.accentBone.withOpacity(0.10),
-              borderRadius: BorderRadius.circular(10),
+              borderRadius: BorderRadius.circular(11),
               border: Border.all(color: _C.accentBone.withOpacity(0.25)),
             ),
             child: Row(children: [
-              Icon(Icons.folder_outlined, size: 13, color: _C.accentBone),
-              const SizedBox(width: 6),
+              Icon(Icons.folder_outlined, size: 16, color: _C.accentBone),
+              const SizedBox(width: 7),
               Expanded(child: Text('Biomodelos',
                   style: TextStyle(color: _C.accentBone,
-                      fontSize: 11, fontWeight: FontWeight.w700))),
+                      fontSize: 14, fontWeight: FontWeight.w700))),
               TextButton(
                 onPressed: () => _toggleBiomodelos(),
                 style: TextButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 12),
                   minimumSize: Size.zero,
                   tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                   backgroundColor: _C.accentBone.withOpacity(0.15),
@@ -7116,7 +7220,7 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
                   _bioTodosVisibles ? 'Ocultar' : 'Ver todo',
                   style: TextStyle(
                     color: _C.accentBone,
-                    fontSize: 12,
+                    fontSize: 15,
                     fontWeight: FontWeight.w700,
                   ),
                 ),
@@ -7790,7 +7894,7 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
               _jsModoRegla(true);
             },
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
               decoration: BoxDecoration(
                 color: azul.withOpacity(0.15),
                 borderRadius: BorderRadius.circular(8),
@@ -7890,7 +7994,7 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
               _jsNotaModo(true);
             },
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
               decoration: BoxDecoration(
                 color: amarillo.withOpacity(0.15),
                 borderRadius: BorderRadius.circular(8),

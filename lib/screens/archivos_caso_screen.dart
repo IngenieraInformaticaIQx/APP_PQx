@@ -97,25 +97,25 @@ class _ArchivosCasoScreenState extends State<ArchivosCasoScreen>
       '${d.day.toString().padLeft(2,'0')}/${d.month.toString().padLeft(2,'0')}/${d.year}  '
       '${d.hour.toString().padLeft(2,'0')}:${d.minute.toString().padLeft(2,'0')}';
 
-  String? _derivarCarpeta() {
+  String? _derivarBasePath() {
     final todosGlb = [
       ...widget.caso.biomodelos,
       ...widget.caso.placas.expand((g) => g.placas),
       ...widget.caso.tornillos.expand((g) => g.tornillos),
+      ...widget.caso.carpetas.expand((c) => c.todosArchivos),
     ];
     if (todosGlb.isEmpty) return null;
     final uri = Uri.parse(todosGlb.first.url);
     final segments = uri.pathSegments;
-    if (segments.length < 2) return null;
-    final casoRelPath = segments.take(segments.length - 2).join('/');
-    return '$casoRelPath/archivos';
+    if (segments.length < 3) return null;
+    return segments.take(3).join('/'); // 3D/{uid}/{caso}
   }
 
   Future<void> _cargar() async {
     setState(() { _loading = true; _error = null; });
 
-    final carpeta = _derivarCarpeta();
-    if (carpeta == null) {
+    final basePath = _derivarBasePath();
+    if (basePath == null) {
       setState(() { _loading = false; _error = 'No se pudo determinar la carpeta del caso.'; });
       return;
     }
@@ -125,44 +125,51 @@ class _ArchivosCasoScreenState extends State<ArchivosCasoScreen>
     final password = prefs.getString('login_password') ?? '';
     _credentials = base64Encode(utf8.encode('$email:$password'));
 
-    final carpetaParam = Uri.encodeComponent(carpeta);
-    final url = '$_apiBase/listar_archivos.php?carpeta=$carpetaParam';
+    // Intenta primero minúscula, luego mayúscula
+    for (final nombreCarpeta in ['archivos', 'Archivos']) {
+      final carpetaParam = Uri.encodeComponent('$basePath/$nombreCarpeta');
+      final url = '$_apiBase/listar_archivos.php?carpeta=$carpetaParam';
 
-    try {
-      final resp = await http.get(
-        Uri.parse(url),
-        headers: {'Authorization': 'Basic $_credentials'},
-      ).timeout(const Duration(seconds: 10));
-
-      if (resp.statusCode == 404) {
-        setState(() { _error = 'Endpoint no encontrado (404).\nSube listar_archivos.php al servidor.'; _loading = false; });
-        return;
-      }
-      if (resp.statusCode == 401 || resp.statusCode == 403) {
-        setState(() { _error = 'Sin permisos (${resp.statusCode}). Comprueba las credenciales.'; _loading = false; });
-        return;
-      }
-      if (resp.statusCode != 200) {
-        setState(() { _error = 'Error del servidor (${resp.statusCode}).'; _loading = false; });
-        return;
-      }
-
-      Map<String, dynamic> data;
       try {
-        data = jsonDecode(resp.body) as Map<String, dynamic>;
-      } catch (_) {
-        setState(() { _error = 'Respuesta inválida del servidor.\nComprueba listar_archivos.php.'; _loading = false; });
+        final resp = await http.get(
+          Uri.parse(url),
+          headers: {'Authorization': 'Basic $_credentials'},
+        ).timeout(const Duration(seconds: 10));
+
+        if (resp.statusCode == 404) {
+          setState(() { _error = 'Endpoint no encontrado (404).\nSube listar_archivos.php al servidor.'; _loading = false; });
+          return;
+        }
+        if (resp.statusCode == 401 || resp.statusCode == 403) {
+          setState(() { _error = 'Sin permisos (${resp.statusCode}). Comprueba las credenciales.'; _loading = false; });
+          return;
+        }
+        if (resp.statusCode != 200) continue;
+
+        Map<String, dynamic> data;
+        try {
+          data = jsonDecode(resp.body) as Map<String, dynamic>;
+        } catch (_) {
+          setState(() { _error = 'Respuesta inválida del servidor.'; _loading = false; });
+          return;
+        }
+
+        final lista = (data['archivos'] as List? ?? [])
+            .map((e) => _Archivo.fromJson(e as Map<String, dynamic>))
+            .toList();
+
+        // Si encontró archivos o es la última variante, usar este resultado
+        if (lista.isNotEmpty || nombreCarpeta == 'Archivos') {
+          setState(() { _archivos = lista; _loading = false; });
+          return;
+        }
+      } on Exception catch (e) {
+        setState(() { _error = 'Error de conexión:\n$e'; _loading = false; });
         return;
       }
-
-      final lista = (data['archivos'] as List? ?? [])
-          .map((e) => _Archivo.fromJson(e as Map<String, dynamic>))
-          .toList();
-      setState(() { _archivos = lista; _loading = false; });
-
-    } on Exception catch (e) {
-      setState(() { _error = 'Error de conexión:\n$e'; _loading = false; });
     }
+
+    setState(() { _archivos = []; _loading = false; });
   }
 
   Future<void> _abrirArchivo(_Archivo archivo) async {
@@ -220,16 +227,21 @@ class _ArchivosCasoScreenState extends State<ArchivosCasoScreen>
       await tmpFile.writeAsBytes(resp.bodyBytes);
       if (!mounted) return;
 
+      const _imgExts = {'jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'heic', 'heif'};
       if (ext == 'pdf') {
         Navigator.push(context, MaterialPageRoute(
           builder: (_) => VisorPdfScreen(rutaLocal: tmpFile.path, nombre: archivo.nombre),
         ));
       } else if (ext == 'txt') {
-        // Decodificar directo de bytes para evitar problemas de encoding en disco
         final texto = _decodificarTexto(resp.bodyBytes);
         if (!mounted) return;
         Navigator.push(context, MaterialPageRoute(
           builder: (_) => _VisorTextoScreen(texto: texto, nombre: archivo.nombre),
+        ));
+      } else if (_imgExts.contains(ext)) {
+        if (!mounted) return;
+        Navigator.push(context, MaterialPageRoute(
+          builder: (_) => _VisorImagenScreen(file: tmpFile, nombre: archivo.nombre),
         ));
       } else {
         _mostrarError('Formato .$ext no compatible con el visor.');
@@ -692,6 +704,61 @@ class _Archivo {
     url:    j['url']    as String? ?? '',
     tipo:   j['tipo']   as String? ?? 'otro',
   );
+}
+
+// ── Visor de imagen local ───────────────────────────────────────────────────
+class _VisorImagenScreen extends StatelessWidget {
+  final File file;
+  final String nombre;
+  const _VisorImagenScreen({required this.file, required this.nombre});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: Stack(children: [
+        InteractiveViewer(
+          minScale: 0.5,
+          maxScale: 8.0,
+          child: SizedBox.expand(
+            child: Image.file(file, fit: BoxFit.contain,
+                errorBuilder: (_, __, ___) => const Center(
+                    child: Icon(Icons.broken_image_outlined,
+                        color: Colors.white54, size: 64))),
+          ),
+        ),
+        SafeArea(
+          child: Align(
+            alignment: Alignment.topLeft,
+            child: GestureDetector(
+              onTap: () => Navigator.pop(context),
+              child: Container(
+                margin: const EdgeInsets.all(12),
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.black54,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(Icons.close, color: Colors.white, size: 22),
+              ),
+            ),
+          ),
+        ),
+        SafeArea(
+          child: Align(
+            alignment: Alignment.topCenter,
+            child: Padding(
+              padding: const EdgeInsets.only(top: 16),
+              child: Text(nombre,
+                  style: const TextStyle(color: Colors.white70,
+                      fontSize: 13, fontWeight: FontWeight.w600),
+                  maxLines: 1, overflow: TextOverflow.ellipsis),
+            ),
+          ),
+        ),
+      ]),
+    );
+  }
 }
 
 // ── Visor de texto plano ────────────────────────────────────────────────────

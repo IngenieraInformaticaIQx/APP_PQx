@@ -148,8 +148,8 @@ class _CasosScreenState extends State<CasosScreen>
               casosConEstadoLocal.add(CasoMedico(
                 id: c.id, nombre: c.nombre, paciente: c.paciente,
                 fechaOp: c.fechaOp, estado: estadoLocal,
-                biomodelos: c.biomodelos, pre: c.pre, post: c.post,
-                placas: c.placas, tornillos: c.tornillos,
+                biomodelos: c.biomodelos, placas: c.placas,
+                tornillos: c.tornillos, carpetas: c.carpetas,
               ));
             } else {
               casosConEstadoLocal.add(c);
@@ -442,10 +442,9 @@ class _CasosScreenState extends State<CasosScreen>
                         fechaOp:    caso.fechaOp,
                         estado:     nuevoEstado,
                         biomodelos: caso.biomodelos,
-                        pre:        caso.pre,
-                        post:       caso.post,
                         placas:     caso.placas,
                         tornillos:  caso.tornillos,
+                        carpetas:   caso.carpetas,
                       );
                       _fechasEstado[caso.id] = DateTime.now().toIso8601String();
                     }
