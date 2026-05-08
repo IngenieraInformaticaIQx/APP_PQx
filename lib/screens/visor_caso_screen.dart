@@ -335,8 +335,9 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
 
   double _panelHeight = 680.0;
   bool _autoRotate   = false;
-  bool _ghostVisible = true;
-  bool _visorListo   = false;
+  bool _ghostVisible    = true;
+  bool _modoFullscreen  = false;
+  bool _visorListo      = false;
   final _visorWindowsKey = GlobalKey<VisorWindowsState>();
   String _credencial = '';
   late Future<void> _credencialesFuture;
@@ -535,6 +536,7 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
 
           final numBio = widget.caso.biomodelos.length;
           _jsRun('window._numBiomodelos = $numBio;');
+          _jsRun('window._preStartIdx = ${widget.caso.preStartIdx};');
           _jsRun('window._showRxDimensions = ${_mostrarCotasRx ? 'true' : 'false'};');
 
           final nombreEsc = widget.caso.nombre.replaceAll("'", "");
@@ -753,6 +755,7 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
     _jsRun('window.visor.setBackground(${AppTheme.isDark.value});');
     final numBio = widget.caso.biomodelos.length;
     _jsRun('window._numBiomodelos = $numBio;');
+    _jsRun('window._preStartIdx = ${widget.caso.preStartIdx};');
     _jsRun('window._showRxDimensions = ${_mostrarCotasRx ? 'true' : 'false'};');
     final nombreEsc = widget.caso.nombre.replaceAll("'", "");
     final pacienteEsc = widget.caso.paciente.replaceAll("'", "");
@@ -2519,7 +2522,11 @@ function cargarGlbBase64(id, b64){
   setTimeout(()=>{
   try{
     loader.parse(b64ToBuffer(b64),'', gltf=>{
-      const esHueso = id.startsWith('glb_') && parseInt(id.replace('glb_','')) < window._numBiomodelos;
+      const _idx = parseInt(id.replace('glb_',''));
+      const esHueso = id.startsWith('glb_') && (
+        _idx < window._numBiomodelos ||
+        (window._preStartIdx != null && _idx >= window._preStartIdx)
+      );
 
       // Detectar y guardar trayectorias (T1, T2...) — invisibles en escena
       gltf.scene.traverse(c=>{
@@ -3080,10 +3087,16 @@ function toggleTrayectoriasGlb(id, v){
   _invalidarCacheMeshes();
 }
 function setOpacidad(id,op){
+  VisorLog.postMessage('setOpacidad id='+id+' op='+op+' existe='+(!!modelos[id]));
   if(!modelos[id]) return;
+  let n=0;
   modelos[id].traverse(c=>{
-    if(c.isMesh && !c.userData.esTrayectoria){ c.material.transparent=op<1; c.material.opacity=op; c.material.needsUpdate=true; }
+    if(c.isMesh && !c.userData.esTrayectoria){
+      const mats = Array.isArray(c.material) ? c.material : [c.material];
+      mats.forEach(m=>{ m.transparent=op<1; m.opacity=op; m.needsUpdate=true; n++; });
+    }
   });
+  VisorLog.postMessage('setOpacidad meshes='+n+' needsRender=true');
   needsRender = true;
 }
 function setAutoRotate(v){ controls.autoRotate=v; controls.autoRotateSpeed=1.5; needsRender = true; }
@@ -3094,10 +3107,9 @@ function setXray(op){
     const m = modelos[id];
     if(!m || !m.userData.esHueso) continue;
     m.traverse(c=>{
-      if(c.isMesh){
-        c.material.transparent = op < 1;
-        c.material.opacity = op;
-        c.material.needsUpdate = true;
+      if(c.isMesh && !c.userData.esTornillo){
+        const mats = Array.isArray(c.material) ? c.material : [c.material];
+        mats.forEach(mat=>{ mat.transparent=op<1; mat.opacity=op; mat.needsUpdate=true; });
       }
     });
   }
@@ -4824,6 +4836,7 @@ window.addEventListener('resize',()=>{
   needsRender = true;
 });
 window._numBiomodelos = 0; // se sobreescribe desde Flutter antes de cargar GLBs
+window._preStartIdx = null;  // se sobreescribe desde Flutter; null = sin carpetas pre/post
 window._showRxDimensions = false; // true solo en flujo de radiografia
 setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorReady.postMessage('ready'); },500);
 </script>
@@ -4886,11 +4899,13 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
         child: SafeArea(
           child: Stack(children: [
             Positioned.fill(
-              top: 64,
+              top: _modoFullscreen ? 0 : 64,
               child: AbsorbPointer(
                 absorbing: _tapPendiente != null,
                 child: ClipRRect(
-                  borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+                  borderRadius: _modoFullscreen
+                      ? BorderRadius.zero
+                      : const BorderRadius.vertical(top: Radius.circular(20)),
                   child: Platform.isWindows
                     ? VisorWindows(
                         key: _visorWindowsKey,
@@ -5016,6 +5031,8 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
                 ),
               ),
             ),
+            // ── UI oculta en modo fullscreen ──────────────────────────────
+            if (!_modoFullscreen) ...[
             // Watermark se renderiza dentro del WebView
             // Doble tap para abrir el panel lateral
             if (!_panelAbierto && !Platform.isAndroid && !Platform.isIOS)
@@ -5037,7 +5054,7 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
                 ),
               ),
             _buildBtnLimpiar(),
-            _buildBtnGhost(),
+            // _buildBtnGhost(), // eliminado: sin movimiento de placas el ghost no es necesario
             _buildPanelLateral(),
             if (_placaArrastrandoActiva || _placaDesplazamiento.tieneDesplazamiento)
               _medidasMinimizado ? _buildMedidasBtnMinimizado() : _buildPanelMedidasFlotante(),
@@ -5223,7 +5240,9 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
             ),
             // Panel plano de corte
             if (_planoCortando) _buildPanelCorte(),
-            // Popup de selección de tornillo
+            ], // fin if (!_modoFullscreen)
+            // ── Siempre activos (también en fullscreen) ─────────────────────
+            // Popup selección tornillo
             if (_tapPendiente != null) ...[
               Positioned.fill(
                 child: GestureDetector(
@@ -5243,6 +5262,42 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
               ),
               _buildScrewInfoLabel(context),
             ],
+            // ── Botón fullscreen (siempre visible) ─────────────────────────
+            Positioned(
+              bottom: 18, left: 146,
+              child: GestureDetector(
+                onTap: () => setState(() => _modoFullscreen = !_modoFullscreen),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(20),
+                  child: BackdropFilter(
+                    filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+                    child: Container(
+                      width: 36, height: 36,
+                      decoration: BoxDecoration(
+                        color: _modoFullscreen
+                            ? const Color(0xFF2A7FF5).withOpacity(0.18)
+                            : AppTheme.cardBg1,
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(
+                          color: _modoFullscreen
+                              ? const Color(0xFF2A7FF5).withOpacity(0.7)
+                              : AppTheme.cardBorder,
+                          width: 1.5,
+                        ),
+                        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 8, offset: const Offset(0, 3))],
+                      ),
+                      child: Center(child: Icon(
+                        _modoFullscreen ? Icons.fullscreen_exit : Icons.fullscreen,
+                        size: 19,
+                        color: _modoFullscreen
+                            ? const Color(0xFF2A7FF5)
+                            : AppTheme.darkText.withOpacity(0.7),
+                      )),
+                    ),
+                  ),
+                ),
+              ),
+            ),
           ]),
         ),
       ),
