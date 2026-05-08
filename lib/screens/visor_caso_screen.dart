@@ -1259,7 +1259,9 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
   void _jsAutoRotate(bool v) => _jsRun("window.visor.setAutoRotate($v);");
   void _jsResetCamara() => _jsRun("window.visor.resetCamara();");
   void _jsVista(int v) => _jsRun("window.visor.setVista($v);");
-  void _jsXray(double op) => _jsRun("window.visor.setXray($op);");
+  void _jsXray(double op) => _jsRun(
+      "window._huesoIndices = ${_calcularHuesoIndices()};"
+      "window.visor.setXray($op);");
   void _jsLuz(int modo) => _jsRun("window.visor.setLuz($modo);");
   void _jsColor(int idx, Color c) {
     final r = c.red.toRadixString(16).padLeft(2, '0');
@@ -1825,18 +1827,133 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
     }
   }
 
-  /// Índices GLB que responden al xray: biomodelos + carpetas llamadas "biomodelos"
+  String _normalizarEtiquetaGlb(String valor) {
+    return valor
+        .toLowerCase()
+        .replaceAll(RegExp(r'[áàäâ]'), 'a')
+        .replaceAll(RegExp(r'[éèëê]'), 'e')
+        .replaceAll(RegExp(r'[íìïî]'), 'i')
+        .replaceAll(RegExp(r'[óòöô]'), 'o')
+        .replaceAll(RegExp(r'[úùüû]'), 'u')
+        .replaceAll('ñ', 'n')
+        .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
+        .trim();
+  }
+
+  bool _textoContieneAlguno(String texto, List<String> terminos) {
+    final normalizado = _normalizarEtiquetaGlb(texto);
+    if (normalizado.isEmpty) return false;
+    return terminos.any((t) => normalizado.contains(t));
+  }
+
+  bool _esEtiquetaImplante(String texto) {
+    return _textoContieneAlguno(texto, const [
+      'placa',
+      'placas',
+      'plate',
+      'implant',
+      'implante',
+      'implantes',
+      'tornillo',
+      'tornillos',
+      'screw',
+      'screws',
+      'guia',
+      'guias',
+      'guide',
+      'guides',
+    ]);
+  }
+
+  bool _esEtiquetaHueso(String texto) {
+    return _textoContieneAlguno(texto, const [
+      'biomodelo',
+      'biomodelos',
+      'hueso',
+      'huesos',
+      'bone',
+      'bones',
+      'tibia',
+      'perone',
+      'fibula',
+      'astragalo',
+      'talus',
+      'calcaneo',
+      'calcaneus',
+      'femur',
+      'rotula',
+      'patella',
+      'pelvis',
+      'humero',
+      'humerus',
+      'radio',
+      'radius',
+      'cubito',
+      'ulna',
+      'escapula',
+      'scapula',
+      'clavicula',
+      'costilla',
+      'vertebra',
+      'sacro',
+    ]);
+  }
+
+  /// Indices GLB que responden al xray: biomodelos de primer nivel y
+  /// archivos/carpetas que claramente son hueso en visores genericos.
   String _calcularHuesoIndices() {
-    final indices = <int>[];
+    final indices = <int>{};
     for (int i = 0; i < widget.caso.biomodelos.length; i++) indices.add(i);
     for (int ci = 0; ci < widget.caso.carpetas.length; ci++) {
-      if (widget.caso.carpetas[ci].nombre.toLowerCase() == 'biomodelos') {
-        final start = widget.caso.carpetaStartIdx(ci);
-        final n = widget.caso.carpetas[ci].todosArchivos.length;
-        for (int i = start; i < start + n; i++) indices.add(i);
+      final carpeta = widget.caso.carpetas[ci];
+      final carpetaImplante = _esEtiquetaImplante(carpeta.nombre);
+      final carpetaHueso =
+          !carpetaImplante && _esEtiquetaHueso(carpeta.nombre);
+      var idx = widget.caso.carpetaStartIdx(ci);
+
+      for (final grupo in carpeta.grupos) {
+        final grupoImplante = _esEtiquetaImplante(grupo.nombre);
+        final grupoHueso = !grupoImplante && _esEtiquetaHueso(grupo.nombre);
+
+        for (final archivo in grupo.archivos) {
+          final etiquetaArchivo = '${archivo.nombre} ${archivo.archivo}';
+          final archivoImplante = _esEtiquetaImplante(etiquetaArchivo);
+          final archivoHueso =
+              !archivoImplante && _esEtiquetaHueso(etiquetaArchivo);
+
+          if (!carpetaImplante &&
+              !grupoImplante &&
+              (carpetaHueso || grupoHueso || archivoHueso)) {
+            indices.add(idx);
+          }
+          idx++;
+        }
       }
     }
-    return indices.toString(); // [0,1,2,...] válido como array JS
+
+    if (indices.isEmpty && widget.caso.biomodelos.isEmpty) {
+      for (int ci = 0; ci < widget.caso.carpetas.length; ci++) {
+        final carpeta = widget.caso.carpetas[ci];
+        final carpetaImplante = _esEtiquetaImplante(carpeta.nombre);
+        var idx = widget.caso.carpetaStartIdx(ci);
+
+        for (final grupo in carpeta.grupos) {
+          final grupoImplante = _esEtiquetaImplante(grupo.nombre);
+
+          for (final archivo in grupo.archivos) {
+            final etiquetaArchivo = '${archivo.nombre} ${archivo.archivo}';
+            final archivoImplante = _esEtiquetaImplante(etiquetaArchivo);
+            if (!carpetaImplante && !grupoImplante && !archivoImplante) {
+              indices.add(idx);
+            }
+            idx++;
+          }
+        }
+      }
+    }
+
+    final ordenados = indices.toList()..sort();
+    return ordenados.toString(); // [0,1,2,...] válido como array JS
   }
 
   void _toggleCarpeta(int ci) {
@@ -1903,7 +2020,7 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
   width:100%;
   height:100%;
   overflow:hidden;
-  background:#F0F0F3;
+  background:linear-gradient(160deg,#F0F0F3 0%,#E4E4ED 50%,#DCDCE8 100%);
   touch-action:none;
   -webkit-user-select:none;
   user-select:none;
@@ -1913,12 +2030,95 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
   display:block;
   width:100%!important;
   height:100%!important;
+  position:relative;
+  z-index:2;
   touch-action:none;
   outline:none;
   -webkit-user-select:none;
   user-select:none;
   -webkit-touch-callout:none;
 }
+  /* ── Orbes de fondo animados ──────────────────────────────── */
+  #orbes .orb{
+    position:absolute;border-radius:50%;
+    filter:blur(6px);
+    will-change:transform,opacity;
+    opacity:0.55;
+  }
+  #orbes .orb.o1{
+    top:10%;left:8%;width:120px;height:120px;
+    background:radial-gradient(circle,rgba(42,127,245,0.14) 0%,rgba(42,127,245,0.03) 50%,transparent 75%);
+    animation:orbFloat1 18s ease-in-out infinite, orbPulse 5s ease-in-out infinite;
+  }
+  #orbes .orb.o2{
+    bottom:15%;right:12%;width:100px;height:100px;
+    background:radial-gradient(circle,rgba(142,68,173,0.12) 0%,rgba(142,68,173,0.025) 50%,transparent 75%);
+    animation:orbFloat2 22s ease-in-out infinite, orbPulse 7s ease-in-out infinite -2s;
+  }
+  #orbes .orb.o3{
+    top:55%;left:48%;width:80px;height:80px;
+    background:radial-gradient(circle,rgba(42,127,245,0.10) 0%,rgba(42,127,245,0.02) 55%,transparent 80%);
+    animation:orbFloat3 16s ease-in-out infinite, orbPulse 4s ease-in-out infinite -1s;
+  }
+  #orbes .orb.o4{
+    top:25%;left:65%;width:70px;height:70px;
+    background:radial-gradient(circle,rgba(80,180,220,0.12) 0%,rgba(80,180,220,0.025) 55%,transparent 80%);
+    animation:orbFloat4 20s ease-in-out infinite, orbPulse 6s ease-in-out infinite -3s;
+  }
+  #orbes .orb.o5{
+    bottom:30%;left:18%;width:90px;height:90px;
+    background:radial-gradient(circle,rgba(180,140,220,0.10) 0%,rgba(180,140,220,0.02) 55%,transparent 80%);
+    animation:orbFloat5 24s ease-in-out infinite, orbPulse 8s ease-in-out infinite -4s;
+  }
+  #orbes .orb.o6{
+    top:70%;right:25%;width:60px;height:60px;
+    background:radial-gradient(circle,rgba(120,200,255,0.11) 0%,rgba(120,200,255,0.02) 55%,transparent 80%);
+    animation:orbFloat6 14s ease-in-out infinite, orbPulse 5s ease-in-out infinite -2s;
+  }
+  #orbes .orb.o7{
+    top:8%;right:35%;width:55px;height:55px;
+    background:radial-gradient(circle,rgba(220,160,255,0.10) 0%,rgba(220,160,255,0.02) 55%,transparent 80%);
+    animation:orbFloat7 19s ease-in-out infinite, orbPulse 6s ease-in-out infinite -3s;
+  }
+  @keyframes orbFloat1{
+    0%,100%{transform:translate(0,0) scale(1);}
+    25%{transform:translate(180px,120px) scale(1.15);}
+    50%{transform:translate(320px,40px) scale(0.92);}
+    75%{transform:translate(140px,-80px) scale(1.05);}
+  }
+  @keyframes orbFloat2{
+    0%,100%{transform:translate(0,0) scale(1);}
+    33%{transform:translate(-220px,-140px) scale(1.12);}
+    66%{transform:translate(-100px,80px) scale(0.95);}
+  }
+  @keyframes orbFloat3{
+    0%,100%{transform:translate(0,0) scale(1);}
+    25%{transform:translate(-160px,-100px) scale(1.1);}
+    50%{transform:translate(120px,-180px) scale(0.9);}
+    75%{transform:translate(200px,80px) scale(1.08);}
+  }
+  @keyframes orbFloat4{
+    0%,100%{transform:translate(0,0) scale(1);}
+    50%{transform:translate(-260px,200px) scale(1.18);}
+  }
+  @keyframes orbFloat5{
+    0%,100%{transform:translate(0,0) scale(1);}
+    40%{transform:translate(240px,-120px) scale(1.1);}
+    70%{transform:translate(80px,-220px) scale(0.92);}
+  }
+  @keyframes orbFloat6{
+    0%,100%{transform:translate(0,0) scale(1);}
+    50%{transform:translate(-180px,-160px) scale(1.15);}
+  }
+  @keyframes orbFloat7{
+    0%,100%{transform:translate(0,0) scale(1);}
+    33%{transform:translate(120px,200px) scale(1.1);}
+    66%{transform:translate(-80px,160px) scale(0.95);}
+  }
+  @keyframes orbPulse{
+    0%,100%{opacity:0.45;}
+    50%{opacity:0.7;}
+  }
   #loading{
     position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
     background:linear-gradient(160deg,#F0F0F3 0%,#DCDCE8 100%);
@@ -2012,9 +2212,13 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
 <div id="loading"><div class="spinner"></div><span>Cargando modelo…</span></div>
 <div id="watermark"><div class="wm-nombre" id="wm-nombre"></div><div class="wm-paciente" id="wm-paciente"></div></div>
 <div id="orbes" style="position:fixed;inset:0;pointer-events:none;z-index:1;overflow:hidden;">
-  <div style="position:absolute;top:-80px;right:-60px;width:320px;height:320px;border-radius:50%;background:radial-gradient(circle,rgba(42,127,245,0.13) 0%,transparent 70%);"></div>
-  <div style="position:absolute;bottom:-60px;left:-80px;width:280px;height:280px;border-radius:50%;background:radial-gradient(circle,rgba(142,68,173,0.08) 0%,transparent 70%);"></div>
-  <div style="position:absolute;top:40%;left:60%;width:200px;height:200px;border-radius:50%;background:radial-gradient(circle,rgba(42,127,245,0.06) 0%,transparent 70%);"></div>
+  <div class="orb o1"></div>
+  <div class="orb o2"></div>
+  <div class="orb o3"></div>
+  <div class="orb o4"></div>
+  <div class="orb o5"></div>
+  <div class="orb o6"></div>
+  <div class="orb o7"></div>
 </div>
 <script type="importmap">
 {"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}
@@ -2034,21 +2238,18 @@ const _isMob = /iPhone|iPad|Android/i.test(navigator.userAgent) ||
 
 // ── Escena ─────────────────────────────────────────────────────────────────
 const scene = new THREE.Scene();
-const c2d = document.createElement('canvas'); c2d.width=2; c2d.height=512;
-const ctx = c2d.getContext('2d');
-const gr  = ctx.createLinearGradient(0,0,0,512);
-gr.addColorStop(0,'#E8E8F0'); gr.addColorStop(0.5,'#DCDCE8'); gr.addColorStop(1,'#F0F0F3');
-ctx.fillStyle=gr; ctx.fillRect(0,0,2,512);
-scene.background = new THREE.CanvasTexture(c2d);
+// Fondo transparente: el gradiente y los orbes vienen del HTML/CSS detrás del canvas.
+scene.background = null;
 
 const camera = new THREE.PerspectiveCamera(45, innerWidth/innerHeight, 0.1, 2000);
 camera.position.set(0,0,500);
 
-const renderer = new THREE.WebGLRenderer({antialias:true, logarithmicDepthBuffer:true, preserveDrawingBuffer:true});
+const renderer = new THREE.WebGLRenderer({antialias:true, alpha:true, logarithmicDepthBuffer:true, preserveDrawingBuffer:true});
 renderer.setPixelRatio(_isMob
   ? Math.min(devicePixelRatio, 1.5)  // móvil: limitar DPR para reducir carga GPU
   : Math.min(devicePixelRatio, 2));
 renderer.setSize(innerWidth, innerHeight);
+renderer.setClearColor(0x000000, 0);
 renderer.shadowMap.enabled = true;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 document.body.appendChild(renderer.domElement);
@@ -2074,8 +2275,16 @@ controls.zoomSpeed = 1.2;
 controls.addEventListener('start', () => { controls.saveState(); });
 
 // ── Post-procesado: OutlinePass para glow de placa seleccionada ─────────────
-const composer = new EffectComposer(renderer);
-composer.addPass(new RenderPass(scene, camera));
+// Render target con alpha explícito para que la transparencia llegue hasta el canvas final
+const _rt = new THREE.WebGLRenderTarget(innerWidth, innerHeight, {
+  format: THREE.RGBAFormat,
+  type: THREE.UnsignedByteType,
+});
+_rt.texture.colorSpace = THREE.NoColorSpace;
+const composer = new EffectComposer(renderer, _rt);
+const _rp = new RenderPass(scene, camera);
+_rp.clearAlpha = 0;
+composer.addPass(_rp);
 const outlinePass = new OutlinePass(new THREE.Vector2(innerWidth, innerHeight), scene, camera);
 outlinePass.edgeStrength  = _isMob ? 3.0 : 5.0;
 outlinePass.edgeGlow      = _isMob ? 0.5 : 1.5; // blur passes = principal coste GPU
@@ -2084,7 +2293,9 @@ outlinePass.pulsePeriod   = 0;
 outlinePass.visibleEdgeColor.set(0x2A7FF5);
 outlinePass.hiddenEdgeColor.set(0x1A5FD8);
 composer.addPass(outlinePass);
-composer.addPass(new OutputPass());
+const _op = new OutputPass();
+_op.material.transparent = true;
+composer.addPass(_op);
 
 
 const draco = new DRACOLoader();
@@ -2690,6 +2901,9 @@ function cargarGlbBase64(id, b64){
       gltf.scene.userData.origQuat = gltf.scene.quaternion.clone();
       modelos[id]=gltf.scene;
       if(esHueso) _addCotasRx(id, gltf.scene);
+      if(esHueso && _xrayOpacityActual < 1){
+        _aplicarOpacidadModelo(gltf.scene, _xrayOpacityActual);
+      }
       if(!esHueso) _crearHuellaOrigen(id, gltf.scene);
       _actualizarHuellaOrigen(id);
       _invalidarCacheMeshes(); // el nuevo modelo cambia la escena
@@ -3165,20 +3379,42 @@ function setOpacidad(id,op){
 function setAutoRotate(v){ controls.autoRotate=v; controls.autoRotateSpeed=1.5; needsRender = true; }
 
 // ── Modo Rayos X: transparenta todos los huesos ──────────────────────────
-function setXray(op){
+let _xrayOpacityActual = 1;
+
+function _glbIndex(id){
+  const match = /^glb_(\d+)$/.exec(id);
+  return match ? parseInt(match[1], 10) : NaN;
+}
+
+function _esModeloHuesoXray(id, modelo){
+  if(modelo && modelo.userData && modelo.userData.esHueso) return true;
+  const idx = _glbIndex(id);
+  if(!Number.isFinite(idx)) return false;
+  if(Array.isArray(window._huesoIndices) && window._huesoIndices.includes(idx)) return true;
   const nBio = window._numBiomodelos || 0;
-  if(nBio === 0) return;
+  return nBio > 0 && idx < nBio;
+}
+
+function _aplicarOpacidadModelo(modelo, op){
+  modelo.traverse(c=>{
+    if(c.isMesh && !c.userData.esTornillo){
+      const mats = Array.isArray(c.material) ? c.material : [c.material];
+      mats.forEach(mat=>{
+        mat.transparent = op < 1;
+        mat.opacity = op;
+        mat.needsUpdate = true;
+      });
+    }
+  });
+}
+
+function setXray(op){
+  _xrayOpacityActual = op;
   for(const id in modelos){
     const m = modelos[id];
     if(!m) continue;
-    const _idx = parseInt(id.replace('glb_',''));
-    if(_idx >= nBio) continue;
-    m.traverse(c=>{
-      if(c.isMesh && !c.userData.esTornillo){
-        const mats = Array.isArray(c.material) ? c.material : [c.material];
-        mats.forEach(mat=>{ mat.transparent=op<1; mat.opacity=op; mat.needsUpdate=true; });
-      }
-    });
+    if(!_esModeloHuesoXray(id, m)) continue;
+    _aplicarOpacidadModelo(m, op);
   }
   needsRender = true;
 }
@@ -3556,19 +3792,14 @@ window.visor={
   addReglaLibre,
   toggleRegla, eliminarRegla, limpiarTodo,
   setBackground: function(dark){
-    const c=document.createElement('canvas'); c.width=2; c.height=512;
-    const cx=c.getContext('2d');
-    const g=cx.createLinearGradient(0,0,0,512);
     document.body.classList.toggle('dark', !!dark);
     if(dark){
-      g.addColorStop(0,'#0D0D1A'); g.addColorStop(0.5,'#16213E'); g.addColorStop(1,'#0D0D1A');
-      document.body.style.background='#0D0D1A';
+      document.body.style.background='linear-gradient(160deg,#0D0D1A 0%,#16213E 50%,#0D0D1A 100%)';
     } else {
-      g.addColorStop(0,'#E8E8F0'); g.addColorStop(0.5,'#DCDCE8'); g.addColorStop(1,'#F0F0F3');
-      document.body.style.background='#F0F0F3';
+      document.body.style.background='linear-gradient(160deg,#F0F0F3 0%,#E4E4ED 50%,#DCDCE8 100%)';
     }
-    cx.fillStyle=g; cx.fillRect(0,0,2,512);
-    scene.background=new THREE.CanvasTexture(c);
+    // Mantener escena WebGL transparente para que se vean los orbes HTML detrás del canvas
+    scene.background = null;
     needsRender = true;
   },
   capturarVista: function(v){
@@ -4931,9 +5162,17 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
     if (!AppTheme.isDark.value) return html;
     const darkCss = '''
 <style id="theme-dark">
-  html,body { background:#0D0D1A !important; }
+  html,body { background:linear-gradient(160deg,#0D0D1A 0%,#16213E 50%,#0D0D1A 100%) !important; }
   #loading   { background:linear-gradient(160deg,#0D0D1A 0%,#16213E 100%) !important;
                color:rgba(236,236,244,0.55) !important; }
+  /* Orbes sutiles sobre fondo oscuro */
+  #orbes .orb.o1{ background:radial-gradient(circle,rgba(80,160,255,0.18) 0%,rgba(80,160,255,0.04) 50%,transparent 75%) !important; }
+  #orbes .orb.o2{ background:radial-gradient(circle,rgba(170,100,210,0.16) 0%,rgba(170,100,210,0.03) 50%,transparent 75%) !important; }
+  #orbes .orb.o3{ background:radial-gradient(circle,rgba(80,160,255,0.14) 0%,rgba(80,160,255,0.03) 55%,transparent 80%) !important; }
+  #orbes .orb.o4{ background:radial-gradient(circle,rgba(100,200,230,0.16) 0%,rgba(100,200,230,0.03) 55%,transparent 80%) !important; }
+  #orbes .orb.o5{ background:radial-gradient(circle,rgba(200,150,240,0.14) 0%,rgba(200,150,240,0.03) 55%,transparent 80%) !important; }
+  #orbes .orb.o6{ background:radial-gradient(circle,rgba(120,200,255,0.15) 0%,rgba(120,200,255,0.03) 55%,transparent 80%) !important; }
+  #orbes .orb.o7{ background:radial-gradient(circle,rgba(220,160,255,0.14) 0%,rgba(220,160,255,0.03) 55%,transparent 80%) !important; }
 </style>
 </head>''';
     // Also add dark class to body so CSS selectors like body.dark work
@@ -6786,7 +7025,7 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
                 () { setState(() => _autoRotate = !_autoRotate); _jsAutoRotate(_autoRotate); },
                 active: _autoRotate),
               _topBtn(Icons.biotech_outlined,
-                () { setState(() { _modoXray = !_modoXray; _xrayOpacity = _modoXray ? 0.12 : 1.0; }); _jsXray(_xrayOpacity); },
+                () { setState(() { _modoXray = !_modoXray; _xrayOpacity = _modoXray ? 0.35 : 1.0; }); _jsXray(_xrayOpacity); },
                 active: _modoXray),
               _topBtn(Icons.content_cut,
                 () { setState(() => _planoCortando = !_planoCortando); _jsPlano(_planoCortando, _planoEje, _planoPos); },
@@ -7048,9 +7287,10 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
       ...widget.caso.carpetas.asMap().entries.expand((entry) {
         final ci = entry.key;
         final carpeta = entry.value;
-        final kColores = AppTheme.isDark.value ? [
-          const Color(0xFFFFB300), const Color(0xFF00E5FF), const Color(0xFF1565C0),
-          const Color(0xFFE65100), const Color(0xFF2E7D32), const Color(0xFFC62828),
+        final isDark = AppTheme.isDark.value;
+        final kColores = isDark ? [
+          const Color(0xFF7EC8FF), const Color(0xFFD9A8FF), const Color(0xFF9BE58F),
+          const Color(0xFFFFC857), const Color(0xFF80DEEA), const Color(0xFFFF8A80),
         ] : [
           const Color(0xFF9C27B0), const Color(0xFF00897B), const Color(0xFF1565C0),
           const Color(0xFFE65100), const Color(0xFF2E7D32), const Color(0xFFC62828),
@@ -7118,8 +7358,9 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
 
             if (mostrarSubhdr) {
               final bool subTodosVis = _subgrupoTodosVisibles(ci, gi, subStart);
-              // Color distinto al padre: desplazado 2 posiciones en la paleta
-              final subColor = kColores[(ci + 2) % kColores.length];
+              final subColor = isDark
+                  ? const Color(0xFFD1D5DB)
+                  : const Color(0xFF4B5563);
               items.add(_StaggerItem(
                 key: ValueKey('capas-carp-$ci-grp-$gi'),
                 index: gi,
@@ -7130,15 +7371,17 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
                     margin: const EdgeInsets.fromLTRB(18, 4, 10, 1),
                     padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
                     decoration: BoxDecoration(
-                      color: subColor.withOpacity(0.06),
+                      color: subColor.withOpacity(isDark ? 0.055 : 0.04),
                       borderRadius: BorderRadius.circular(9),
-                      border: Border.all(color: subColor.withOpacity(0.22)),
+                      border: Border.all(
+                          color: subColor.withOpacity(isDark ? 0.58 : 0.28)),
                     ),
                     child: Row(children: [
-                      Icon(Icons.folder_open, size: 14, color: subColor.withOpacity(0.75)),
+                      Icon(Icons.folder_open, size: 14,
+                          color: subColor.withOpacity(isDark ? 1.0 : 0.75)),
                       const SizedBox(width: 6),
                       Expanded(child: Text(grupo.nombre, style: TextStyle(
-                          color: subColor.withOpacity(0.85),
+                          color: subColor.withOpacity(isDark ? 1.0 : 0.85),
                           fontSize: 13, fontWeight: FontWeight.w600))),
                       TextButton(
                         onPressed: () => _toggleSubgrupo(ci, gi, subStart),
@@ -7146,7 +7389,7 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
                           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                           minimumSize: Size.zero,
                           tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                          backgroundColor: subColor.withOpacity(0.12),
+                          backgroundColor: subColor.withOpacity(isDark ? 0.10 : 0.08),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(14),
                             side: BorderSide(color: subColor.withOpacity(0.5), width: 0.7),
@@ -7161,7 +7404,8 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
                         turns: subExp ? 0.5 : 0,
                         duration: const Duration(milliseconds: 180),
                         child: Icon(Icons.keyboard_arrow_down,
-                            size: 13, color: subColor.withOpacity(0.6)),
+                            size: 13,
+                            color: subColor.withOpacity(isDark ? 0.85 : 0.6)),
                       ),
                     ]),
                   ),
@@ -7527,9 +7771,9 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
                     child: Container(
                       width: 28, height: 28,
                       decoration: BoxDecoration(
-                        color: _colores[idx] ?? color,
+                        color: _colores[idx] ?? Colors.white,
                         shape: BoxShape.circle,
-                        border: Border.all(color: Colors.white.withOpacity(0.5), width: 1.5),
+                        border: Border.all(color: AppTheme.handleColor, width: 2.2),
                       ),
                     ),
                   ),
