@@ -5040,10 +5040,10 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
                 ),
               ),
             _buildTopBar(),
-            // Overlay para cerrar el panel lateral al tocar fuera (excluye topbar)
+            // Overlay para cerrar el panel lateral al tocar fuera (excluye topbar y botones inferiores)
             if (_panelAbierto)
               Positioned(
-                top: 64, left: 0, right: 0, bottom: 0,
+                top: 64, left: 0, right: 0, bottom: 62,
                 child: GestureDetector(
                   behavior: HitTestBehavior.translucent,
                   onTap: () => setState(() => _panelAbierto = false),
@@ -6057,6 +6057,10 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
     final sesion = await _construirSesionCompleta();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('estado_caso_${widget.caso.id}', json.encode(sesion));
+    // Actualizar fecha siempre, independiente del estado actual
+    final fechaHoy = DateTime.now().toIso8601String();
+    await prefs.setString('estado_fecha_${widget.caso.id}', fechaHoy);
+    widget.onEstadoCambiado?.call(_estadoActual.isNotEmpty ? _estadoActual : 'modificado');
     unawaited(_setEstadoModificado(prefs));
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
