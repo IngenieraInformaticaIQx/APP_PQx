@@ -30,6 +30,7 @@ class _VisorSelectorScreenState extends State<VisorSelectorScreen>
   final List<Animation<Offset>> _cardSlides = [];
 
   bool _cargandoVisor = false;
+  int  _hoveredIndex  = -1;
 
   // ── Paleta de la app (light glass) ────────────────────────────────────────
   static const Color _accent      = Color(0xFF2A7FF5); // azul vivo
@@ -317,9 +318,19 @@ class _VisorSelectorScreenState extends State<VisorSelectorScreen>
                       opacity: _cardFades[i],
                       child: SlideTransition(
                         position: _cardSlides[i],
-                        child: visor.disponible
-                            ? _buildHeroCard(visor, size)
-                            : _buildLockedCard(visor),
+                        child: MouseRegion(
+                          cursor: SystemMouseCursors.click,
+                          onEnter: (_) => setState(() => _hoveredIndex = i),
+                          onExit:  (_) => setState(() => _hoveredIndex = -1),
+                          child: AnimatedScale(
+                            scale: _hoveredIndex == i ? 1.015 : 1.0,
+                            duration: const Duration(milliseconds: 150),
+                            curve: Curves.easeOut,
+                            child: visor.disponible
+                                ? _buildHeroCard(visor, size, hovered: _hoveredIndex == i)
+                                : _buildLockedCard(visor, hovered: _hoveredIndex == i),
+                          ),
+                        ),
                       ),
                     ),
                   );
@@ -361,7 +372,7 @@ class _VisorSelectorScreenState extends State<VisorSelectorScreen>
   }
 
   // ── Card hero grande (disponible) ──────────────────────────────────────────
-  Widget _buildHeroCard(_VisorItem visor, Size size) {
+  Widget _buildHeroCard(_VisorItem visor, Size size, {bool hovered = false}) {
     return GestureDetector(
       onTap: () => _abrirVisor(visor),
       child: AnimatedBuilder(
@@ -371,28 +382,30 @@ class _VisorSelectorScreenState extends State<VisorSelectorScreen>
             borderRadius: BorderRadius.circular(28),
             child: BackdropFilter(
               filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-              child: Container(
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 150),
                 height: 195,
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(28),
-                  // Glass blanco luminoso con toque azul muy suave
                   gradient: LinearGradient(
                     colors: [
                       AppTheme.cardBg1,
                       AppTheme.cardBg2,
-                      visor.accentColor.withOpacity(0.08),
+                      visor.accentColor.withOpacity(hovered ? 0.14 : 0.08),
                     ],
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
                   ),
                   border: Border.all(
-                    color: AppTheme.cardBorder,
-                    width: 1.5,
+                    color: hovered
+                        ? visor.accentColor.withOpacity(0.50)
+                        : AppTheme.cardBorder,
+                    width: hovered ? 1.8 : 1.5,
                   ),
                   boxShadow: [
                     BoxShadow(
-                      color: visor.accentColor.withOpacity(0.18),
-                      blurRadius: 32,
+                      color: visor.accentColor.withOpacity(hovered ? 0.32 : 0.18),
+                      blurRadius: hovered ? 48 : 32,
                       offset: const Offset(0, 12),
                       spreadRadius: -4,
                     ),
@@ -609,27 +622,27 @@ class _VisorSelectorScreenState extends State<VisorSelectorScreen>
   }
 
   // ── Card compacta bloqueada ────────────────────────────────────────────────
-  Widget _buildLockedCard(_VisorItem visor) {
+  Widget _buildLockedCard(_VisorItem visor, {bool hovered = false}) {
     return GestureDetector(
       onTap: () => _abrirVisor(visor),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(20),
         child: BackdropFilter(
           filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
-          child: Container(
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 150),
             height: 78,
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(20),
               gradient: LinearGradient(
-                colors: [
-                  AppTheme.lockedCardBg,
-                  AppTheme.lockedCardBg,
-                ],
+                colors: [AppTheme.lockedCardBg, AppTheme.lockedCardBg],
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
               ),
               border: Border.all(
-                color: AppTheme.lockedCardBorder,
+                color: hovered
+                    ? visor.accentColor.withOpacity(0.30)
+                    : AppTheme.lockedCardBorder,
                 width: 1.2,
               ),
               boxShadow: [
