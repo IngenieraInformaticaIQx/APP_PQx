@@ -2276,9 +2276,11 @@ controls.addEventListener('start', () => { controls.saveState(); });
 
 // ── Post-procesado: OutlinePass para glow de placa seleccionada ─────────────
 // Render target con alpha explícito para que la transparencia llegue hasta el canvas final
-const _rt = new THREE.WebGLRenderTarget(innerWidth, innerHeight, {
+const _dpr = renderer.getPixelRatio();
+const _rt = new THREE.WebGLRenderTarget(Math.floor(innerWidth*_dpr), Math.floor(innerHeight*_dpr), {
   format: THREE.RGBAFormat,
   type: THREE.UnsignedByteType,
+  samples: _isMob ? 2 : 4,
 });
 _rt.texture.colorSpace = THREE.NoColorSpace;
 const composer = new EffectComposer(renderer, _rt);
@@ -5127,9 +5129,10 @@ renderer.domElement.addEventListener('touchcancel', e=>{
 animate();
 controls.addEventListener('change', ()=>{ needsRender = true; });
 window.addEventListener('resize',()=>{
+  const _r = renderer.getPixelRatio();
   camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix();
   renderer.setSize(innerWidth,innerHeight);
-  composer.setSize(innerWidth,innerHeight);
+  composer.setSize(Math.floor(innerWidth*_r),Math.floor(innerHeight*_r));
   outlinePass.resolution.set(innerWidth,innerHeight);
   needsRender = true;
 });
