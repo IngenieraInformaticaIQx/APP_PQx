@@ -6828,7 +6828,8 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
                    'z': double.parse(n.z.toStringAsFixed(2))},
     }).toList();
 
-    // Payload JSON
+    // Payload JSON — los comentarios de vistas personalizadas se incluyen aquí
+    // para que lleguen correctamente en todos los sistemas (n8n iOS ignora fields, solo lee binarios)
     final payload = <String, dynamic>{
       'caso': {
         'id':       widget.caso.id,
@@ -6842,6 +6843,14 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
       if (desplazamientoPlaca != null) 'desplazamiento_placa': desplazamientoPlaca,
       if (mediciones.isNotEmpty)       'mediciones': mediciones,
       if (notas3d.isNotEmpty)          'notas_3d': notas3d,
+      if (_vistasPersonalizadas.isNotEmpty)
+        'vistas_personalizadas': [
+          for (int i = 0; i < _vistasPersonalizadas.length; i++)
+            {
+              'archivo': 'personalizada_$i.jpg',
+              'comentario': _vistasPersonalizadas[i]['comentario'] as String? ?? '',
+            }
+        ],
       'exportado_en': DateTime.now().toIso8601String(),
     };
     final jsonStr = const JsonEncoder.withIndent('  ').convert(payload);
@@ -6938,19 +6947,23 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
     _jsRun('window.visor.setVista(0);');
 
     try {
-      final request = http.MultipartRequest('POST', Uri.parse(_exportarUrl))
-        ..fields['datos'] = jsonStr;
+      final request = http.MultipartRequest('POST', Uri.parse(_exportarUrl));
+
+      // Datos como archivo .txt para que n8n lo reciba como binario en todos los sistemas (iOS incluido)
+      request.files.add(http.MultipartFile.fromBytes(
+        'datos',
+        utf8.encode(jsonStr),
+        filename: 'datos.txt',
+        contentType: MediaType('text', 'plain'),
+      ));
 
       if (frontal   != null) request.files.add(http.MultipartFile.fromBytes('frontal',   frontal,   filename: 'frontal.jpg',    contentType: MediaType('image', 'jpeg')));
       if (lateralD  != null) request.files.add(http.MultipartFile.fromBytes('lateral_d', lateralD,  filename: 'lateral_d.jpg', contentType: MediaType('image', 'jpeg')));
       if (lateralI  != null) request.files.add(http.MultipartFile.fromBytes('lateral_i', lateralI,  filename: 'lateral_i.jpg', contentType: MediaType('image', 'jpeg')));
       if (posterior != null) request.files.add(http.MultipartFile.fromBytes('posterior', posterior, filename: 'posterior.jpg', contentType: MediaType('image', 'jpeg')));
       for (int i = 0; i < _vistasPersonalizadas.length; i++) {
-        final v = _vistasPersonalizadas[i];
-        final bytes = v['bytes'] as Uint8List;
-        final comentario = v['comentario'] as String? ?? '';
+        final bytes = _vistasPersonalizadas[i]['bytes'] as Uint8List;
         request.files.add(http.MultipartFile.fromBytes('personalizada_$i', bytes, filename: 'personalizada_$i.jpg', contentType: MediaType('image', 'jpeg')));
-        if (comentario.isNotEmpty) request.fields['comentario_$i'] = comentario;
       }
 
       final resp = await request.send().timeout(const Duration(seconds: 30));
