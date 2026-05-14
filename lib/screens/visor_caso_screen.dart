@@ -430,6 +430,12 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
   double _screwInfoSx = 0, _screwInfoSy = 0;
   bool _planGuardado  = false;
 
+  // Vistas personalizadas
+  bool _modoVistaPersonalizada = false;
+  final List<Map<String, dynamic>> _vistasPersonalizadas = []; // {bytes, comentario}
+  Completer<void>? _vistasPersonalizadasCompleter;
+  final TextEditingController _comentarioVistaCtrl = TextEditingController();
+
   // Visualización
   double _xrayOpacity   = 1.0;
   bool   _modoXray      = false;
@@ -845,7 +851,25 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
     } else if (!widget.modoGenerico) {
       _credencialesFuture.then((_) async {
         if (!mounted) return;
-        await _restaurarEstadoCaso();
+        final prefs = await SharedPreferences.getInstance();
+        final raw = prefs.getString('estado_caso_${widget.caso.id}');
+        if (raw == null) return;
+        try {
+          final sesion = json.decode(raw) as Map<String, dynamic>;
+          final tieneTornillos  = (sesion['tornillos']    as List? ?? []).isNotEmpty;
+          final tieneNotas      = (sesion['notas']        as List? ?? []).isNotEmpty;
+          final tieneMediciones = (sesion['mediciones']   as List? ?? []).isNotEmpty;
+          final tieneCapas      = (sesion['capas_visibles'] as List? ?? []).isNotEmpty;
+          if (!tieneTornillos && !tieneNotas && !tieneMediciones && !tieneCapas) return;
+          if (!mounted) return;
+          final retomar = await _mostrarPopupRetomar();
+          if (!mounted) return;
+          if (retomar == true) {
+            await _restaurarSesionCompleta(sesion);
+          } else {
+            await prefs.remove('estado_caso_${widget.caso.id}');
+          }
+        } catch (_) {}
       });
     }
   }
@@ -873,6 +897,7 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
         && widget.sesionGuardada == null && !widget.autoCargar) {
       AudioNotasService.eliminarSesion(_sessionAudioId);
     }
+    _comentarioVistaCtrl.dispose();
     super.dispose();
   }
 
@@ -3817,6 +3842,14 @@ window.visor={
       CapturaVista.postMessage(dataUrl);
     }, 900);
   },
+  capturarVistaActual: function(){
+    const prev = outlinePass.selectedObjects.slice();
+    outlinePass.selectedObjects = [];
+    renderer.render(scene, camera);
+    const dataUrl = renderer.domElement.toDataURL('image/png');
+    outlinePass.selectedObjects = prev;
+    CapturaVista.postMessage(dataUrl);
+  },
   capturarPantalla: function(){
     const prev = outlinePass.selectedObjects.slice();
     outlinePass.selectedObjects = [];
@@ -5221,6 +5254,17 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
                         key: _visorWindowsKey,
                         htmlContent: _buildHtmlWindows(),
                         onVisorReady: _onVisorReadyWindows,
+                        onCapturaVista: (msg) {
+                          try {
+                            final bytes = base64Decode(
+                                msg.replaceFirst('data:image/png;base64,', ''));
+                            _capturaVistaCompleter?.complete(Uint8List.fromList(bytes));
+                            _capturaVistaCompleter = null;
+                          } catch (e) {
+                            _capturaVistaCompleter?.completeError(e);
+                            _capturaVistaCompleter = null;
+                          }
+                        },
                         onPlateTapped: (msg) {
                           if (!mounted) return;
                           try { setState(() => _tapPendiente = _TapData.fromJson(jsonDecode(msg))); } catch (_) {}
@@ -5572,6 +5616,8 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
               ),
               _buildScrewInfoLabel(context),
             ],
+            // ── Panel vistas personalizadas ────────────────────────────────
+            if (_modoVistaPersonalizada) _buildPanelVistaPersonalizada(context),
             // ── Botón fullscreen (siempre visible) ─────────────────────────
             Positioned(
               bottom: 18, left: 146,
@@ -5615,12 +5661,103 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
   }
 
   // ── Etiqueta info tornillo (tap sobre tornillo colocado) ──────────────────
+  Widget _buildPanelVistaPersonalizada(BuildContext context) {
+    final n = _vistasPersonalizadas.length + 1;
+    return Positioned(
+      left: 16, right: 16, bottom: 24,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(20),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+          child: Container(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+            decoration: BoxDecoration(
+              color: AppTheme.sheetBg,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: AppTheme.cardBorder, width: 1.2),
+              boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.18), blurRadius: 24, offset: const Offset(0, 6))],
+            ),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              Row(children: [
+                Icon(Icons.add_a_photo_outlined, size: 16, color: const Color(0xFF2A7FF5)),
+                const SizedBox(width: 8),
+                Text('Vista personalizada $n',
+                    style: TextStyle(color: AppTheme.darkText, fontSize: 14, fontWeight: FontWeight.w700)),
+                const Spacer(),
+                if (_vistasPersonalizadas.isNotEmpty)
+                  Text('${_vistasPersonalizadas.length} guardada${_vistasPersonalizadas.length > 1 ? 's' : ''}',
+                      style: TextStyle(color: AppTheme.subtitleColor, fontSize: 11)),
+              ]),
+              const SizedBox(height: 10),
+              TextField(
+                controller: _comentarioVistaCtrl,
+                maxLines: 2,
+                style: TextStyle(color: AppTheme.darkText, fontSize: 13),
+                decoration: InputDecoration(
+                  hintText: 'Comentario del doctor (opcional)…',
+                  hintStyle: TextStyle(color: AppTheme.subtitleColor, fontSize: 12),
+                  filled: true,
+                  fillColor: AppTheme.darkText.withOpacity(0.05),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide.none,
+                  ),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                ),
+              ),
+              const SizedBox(height: 10),
+              Row(children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () async {
+                      final bytes = await _capturarVistaActual();
+                      if (bytes != null) {
+                        setState(() {
+                          _vistasPersonalizadas.add({
+                            'bytes': bytes,
+                            'comentario': _comentarioVistaCtrl.text.trim(),
+                          });
+                          _comentarioVistaCtrl.clear();
+                        });
+                      }
+                    },
+                    icon: const Icon(Icons.camera_alt_outlined, size: 16),
+                    label: const Text('Capturar vista', style: TextStyle(fontSize: 13)),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: const Color(0xFF2A7FF5),
+                      side: BorderSide(color: const Color(0xFF2A7FF5).withOpacity(0.5)),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: () => _vistasPersonalizadasCompleter?.complete(),
+                    icon: const Icon(Icons.send_outlined, size: 16),
+                    label: const Text('Listo, enviar', style: TextStyle(fontSize: 13)),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF34A853),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                    ),
+                  ),
+                ),
+              ]),
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildScrewInfoLabel(BuildContext context) {
     final tc = _screwInfoTc!;
     final screen = MediaQuery.of(context).size;
     const topBarH = 64.0;
-    const cardW = 180.0;
-    const cardH = 72.0;
+    const cardW = 200.0;
+    const cardH = 100.0;
     const margin = 12.0;
 
     double left = _screwInfoSx - cardW / 2;
@@ -5662,6 +5799,24 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
                   Text('Largo: ${tc.largo.toStringAsFixed(0)} mm',
                       style: TextStyle(color: AppTheme.subtitleColor, fontSize: 10)),
                 ],
+                const SizedBox(height: 8),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: GestureDetector(
+                    onTap: () {
+                      setState(() => _screwInfoTc = null);
+                      _eliminarTornillo(tc);
+                    },
+                    child: Container(
+                      width: 38, height: 38,
+                      decoration: BoxDecoration(
+                        color: Colors.red.withOpacity(0.12),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: const Icon(Icons.delete_outline, size: 24, color: Colors.redAccent),
+                    ),
+                  ),
+                ),
               ]),
             ),
           ),
@@ -6059,6 +6214,18 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
   Future<Uint8List?> _capturarVista(int v) async {
     _capturaVistaCompleter = Completer<Uint8List>();
     _jsRun('window.visor.capturarVista($v);');
+    try {
+      return await _capturaVistaCompleter!.future.timeout(const Duration(seconds: 6));
+    } catch (_) {
+      _capturaVistaCompleter = null;
+      return null;
+    }
+  }
+
+  // ── Captura de la vista actual sin mover cámara ──────────────────────────
+  Future<Uint8List?> _capturarVistaActual() async {
+    _capturaVistaCompleter = Completer<Uint8List>();
+    _jsRun('window.visor.capturarVistaActual();');
     try {
       return await _capturaVistaCompleter!.future.timeout(const Duration(seconds: 6));
     } catch (_) {
@@ -6486,6 +6653,79 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
   }
 
   Future<void> _exportarJSON() async {
+    // Preguntar si quiere añadir vistas personalizadas
+    _vistasPersonalizadas.clear();
+    if (!mounted) return;
+    final quierePersonalizar = await showDialog<bool>(
+      context: context,
+      barrierColor: Colors.black.withOpacity(0.45),
+      builder: (_) => AlertDialog(
+        backgroundColor: Colors.transparent,
+        contentPadding: EdgeInsets.zero,
+        content: ClipRRect(
+          borderRadius: BorderRadius.circular(22),
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
+            child: Container(
+              padding: const EdgeInsets.fromLTRB(24, 24, 24, 16),
+              decoration: BoxDecoration(
+                color: AppTheme.sheetBg,
+                borderRadius: BorderRadius.circular(22),
+                border: Border.all(color: AppTheme.cardBorder, width: 1.5),
+              ),
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                Icon(Icons.add_a_photo_outlined, size: 32, color: const Color(0xFF2A7FF5)),
+                const SizedBox(height: 12),
+                Text('Vistas personalizadas',
+                    style: TextStyle(color: AppTheme.darkText, fontSize: 17, fontWeight: FontWeight.w800)),
+                const SizedBox(height: 8),
+                Text('¿Quieres añadir vistas personalizadas con comentarios antes de enviar?',
+                    style: TextStyle(color: AppTheme.subtitleColor, fontSize: 13),
+                    textAlign: TextAlign.center),
+                const SizedBox(height: 20),
+                Row(children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.pop(context, false),
+                      style: OutlinedButton.styleFrom(
+                        side: BorderSide(color: AppTheme.cardBorder),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                      ),
+                      child: Text('No, enviar', style: TextStyle(color: AppTheme.subtitleColor, fontWeight: FontWeight.w600)),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: () => Navigator.pop(context, true),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF2A7FF5),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                      ),
+                      child: const Text('Sí, añadir', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
+                    ),
+                  ),
+                ]),
+              ]),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    if (!mounted) return;
+
+    if (quierePersonalizar == true) {
+      _comentarioVistaCtrl.clear();
+      _vistasPersonalizadasCompleter = Completer<void>();
+      setState(() => _modoVistaPersonalizada = true);
+      await _vistasPersonalizadasCompleter!.future;
+      if (!mounted) return;
+      setState(() => _modoVistaPersonalizada = false);
+    }
+
     final prefs = await SharedPreferences.getInstance();
 
     // Tornillos con posición 3D completa
@@ -6654,10 +6894,11 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
       duration: Duration(seconds: 25),
     ));
 
-    // Capturar las 3 vistas secuencialmente
+    // Capturar las 4 vistas secuencialmente
     final frontal   = await _capturarVista(0); // Frontal
     final lateralD  = await _capturarVista(1); // Lateral derecha
     final lateralI  = await _capturarVista(2); // Lateral izquierda
+    final posterior = await _capturarVista(5); // Posterior
 
     // Volver a frontal al terminar
     _jsRun('window.visor.setVista(0);');
@@ -6666,9 +6907,17 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
       final request = http.MultipartRequest('POST', Uri.parse(_exportarUrl))
         ..fields['datos'] = jsonStr;
 
-      if (frontal  != null) request.files.add(http.MultipartFile.fromBytes('frontal',   frontal,  filename: 'frontal.png',    contentType: MediaType('image', 'png')));
-      if (lateralD != null) request.files.add(http.MultipartFile.fromBytes('lateral_d', lateralD, filename: 'lateral_d.png', contentType: MediaType('image', 'png')));
-      if (lateralI != null) request.files.add(http.MultipartFile.fromBytes('lateral_i', lateralI, filename: 'lateral_i.png', contentType: MediaType('image', 'png')));
+      if (frontal   != null) request.files.add(http.MultipartFile.fromBytes('frontal',   frontal,   filename: 'frontal.png',    contentType: MediaType('image', 'png')));
+      if (lateralD  != null) request.files.add(http.MultipartFile.fromBytes('lateral_d', lateralD,  filename: 'lateral_d.png', contentType: MediaType('image', 'png')));
+      if (lateralI  != null) request.files.add(http.MultipartFile.fromBytes('lateral_i', lateralI,  filename: 'lateral_i.png', contentType: MediaType('image', 'png')));
+      if (posterior != null) request.files.add(http.MultipartFile.fromBytes('posterior', posterior, filename: 'posterior.png', contentType: MediaType('image', 'png')));
+      for (int i = 0; i < _vistasPersonalizadas.length; i++) {
+        final v = _vistasPersonalizadas[i];
+        final bytes = v['bytes'] as Uint8List;
+        final comentario = v['comentario'] as String? ?? '';
+        request.files.add(http.MultipartFile.fromBytes('personalizada_$i', bytes, filename: 'personalizada_$i.png', contentType: MediaType('image', 'png')));
+        if (comentario.isNotEmpty) request.fields['comentario_$i'] = comentario;
+      }
 
       final resp = await request.send().timeout(const Duration(seconds: 30));
       final ok = resp.statusCode >= 200 && resp.statusCode < 300;
