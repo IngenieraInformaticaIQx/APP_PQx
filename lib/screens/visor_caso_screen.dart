@@ -2263,6 +2263,9 @@ import { FXAAShader }      from 'three/addons/shaders/FXAAShader.js';
 const _isMob = /iPhone|iPad|Android/i.test(navigator.userAgent) ||
                (/MacIntel|MacARM/.test(navigator.platform) && navigator.maxTouchPoints > 1);
 
+// Orbes CSS son costosos en móvil (filter:blur en canvas transparente) — se ocultan
+if(_isMob) document.getElementById('orbes').style.display='none';
+
 // ── Escena ─────────────────────────────────────────────────────────────────
 const scene = new THREE.Scene();
 // Fondo transparente: el gradiente y los orbes vienen del HTML/CSS detrás del canvas.
@@ -2271,7 +2274,7 @@ scene.background = null;
 const camera = new THREE.PerspectiveCamera(45, innerWidth/innerHeight, 0.1, 2000);
 camera.position.set(0,0,500);
 
-const renderer = new THREE.WebGLRenderer({antialias:true, alpha:true, logarithmicDepthBuffer:true, preserveDrawingBuffer:true});
+const renderer = new THREE.WebGLRenderer({antialias:!_isMob, alpha:true, logarithmicDepthBuffer:!_isMob, preserveDrawingBuffer:true});
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.setSize(innerWidth, innerHeight);
 renderer.setClearColor(0x000000, 0);
@@ -3814,6 +3817,19 @@ function limpiarTodo(){
   needsRender = true;
 }
 
+// Escala el canvas del renderer a máx 1024px y lo codifica como JPEG para exportación.
+// Reduce el tamaño de envío ~80% respecto al canvas nativo a DPR 2.
+function _captureExportJpeg(){
+  const src = renderer.domElement;
+  const maxPx = 1024;
+  const scale = Math.min(1, maxPx / Math.max(src.width, src.height));
+  const oc = document.createElement('canvas');
+  oc.width  = Math.round(src.width  * scale);
+  oc.height = Math.round(src.height * scale);
+  oc.getContext('2d').drawImage(src, 0, 0, oc.width, oc.height);
+  return oc.toDataURL('image/jpeg', 0.82);
+}
+
 window.visor={
   cargarGlbBase64, registrarTornillo, insertarTornillo,
   toggleGlb, toggleGuias, toggleTrayectoriasGlb, setOpacidad, setAutoRotate, resetCamara, eliminarTornillo,
@@ -3841,7 +3857,7 @@ window.visor={
       const prev = outlinePass.selectedObjects.slice();
       outlinePass.selectedObjects = [];
       renderer.render(scene, camera); // render directo sin outline para captura limpia
-      const dataUrl = renderer.domElement.toDataURL('image/jpeg', 0.85);
+      const dataUrl = _captureExportJpeg();
       outlinePass.selectedObjects = prev;
       CapturaVista.postMessage(dataUrl);
     }, 900);
@@ -3850,7 +3866,7 @@ window.visor={
     const prev = outlinePass.selectedObjects.slice();
     outlinePass.selectedObjects = [];
     renderer.render(scene, camera);
-    const dataUrl = renderer.domElement.toDataURL('image/jpeg', 0.85);
+    const dataUrl = _captureExportJpeg();
     outlinePass.selectedObjects = prev;
     CapturaVista.postMessage(dataUrl);
   },
