@@ -710,7 +710,7 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
           try {
             final base64Str = msg.message;
             final bytes = base64Decode(
-                base64Str.replaceFirst('data:image/png;base64,', ''));
+                base64Str.replaceFirst(RegExp(r'data:image/\w+;base64,'), ''));
             _capturaVistaCompleter?.complete(Uint8List.fromList(bytes));
             _capturaVistaCompleter = null;
           } catch (e) {
@@ -2287,6 +2287,7 @@ scene.add(new THREE.HemisphereLight(0xffffff,0x999999,0.4));
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping=true; controls.dampingFactor=0.08;
 controls.minDistance=0.01; controls.maxDistance=5000;
+controls.addEventListener('change', () => { needsRender = true; });
 // Fix táctil: un dedo = rotar, dos dedos = solo zoom (no rotar+zoom a la vez)
 controls.touches = {
   ONE: THREE.TOUCH.ROTATE,
@@ -2305,7 +2306,7 @@ const _dpr = renderer.getPixelRatio();
 const _rt = new THREE.WebGLRenderTarget(Math.floor(innerWidth*_dpr), Math.floor(innerHeight*_dpr), {
   format: THREE.RGBAFormat,
   type: THREE.UnsignedByteType,
-  samples: 4,
+  samples: _isMob ? 2 : 4,
 });
 _rt.texture.colorSpace = THREE.NoColorSpace;
 const composer = new EffectComposer(renderer, _rt);
@@ -3840,7 +3841,7 @@ window.visor={
       const prev = outlinePass.selectedObjects.slice();
       outlinePass.selectedObjects = [];
       renderer.render(scene, camera); // render directo sin outline para captura limpia
-      const dataUrl = renderer.domElement.toDataURL('image/png');
+      const dataUrl = renderer.domElement.toDataURL('image/jpeg', 0.85);
       outlinePass.selectedObjects = prev;
       CapturaVista.postMessage(dataUrl);
     }, 900);
@@ -3849,7 +3850,7 @@ window.visor={
     const prev = outlinePass.selectedObjects.slice();
     outlinePass.selectedObjects = [];
     renderer.render(scene, camera);
-    const dataUrl = renderer.domElement.toDataURL('image/png');
+    const dataUrl = renderer.domElement.toDataURL('image/jpeg', 0.85);
     outlinePass.selectedObjects = prev;
     CapturaVista.postMessage(dataUrl);
   },
@@ -5261,7 +5262,7 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
                         onCapturaVista: (msg) {
                           try {
                             final bytes = base64Decode(
-                                msg.replaceFirst('data:image/png;base64,', ''));
+                                msg.replaceFirst(RegExp(r'data:image/\w+;base64,'), ''));
                             _capturaVistaCompleter?.complete(Uint8List.fromList(bytes));
                             _capturaVistaCompleter = null;
                           } catch (e) {
@@ -6911,15 +6912,15 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
       final request = http.MultipartRequest('POST', Uri.parse(_exportarUrl))
         ..fields['datos'] = jsonStr;
 
-      if (frontal   != null) request.files.add(http.MultipartFile.fromBytes('frontal',   frontal,   filename: 'frontal.png',    contentType: MediaType('image', 'png')));
-      if (lateralD  != null) request.files.add(http.MultipartFile.fromBytes('lateral_d', lateralD,  filename: 'lateral_d.png', contentType: MediaType('image', 'png')));
-      if (lateralI  != null) request.files.add(http.MultipartFile.fromBytes('lateral_i', lateralI,  filename: 'lateral_i.png', contentType: MediaType('image', 'png')));
-      if (posterior != null) request.files.add(http.MultipartFile.fromBytes('posterior', posterior, filename: 'posterior.png', contentType: MediaType('image', 'png')));
+      if (frontal   != null) request.files.add(http.MultipartFile.fromBytes('frontal',   frontal,   filename: 'frontal.jpg',    contentType: MediaType('image', 'jpeg')));
+      if (lateralD  != null) request.files.add(http.MultipartFile.fromBytes('lateral_d', lateralD,  filename: 'lateral_d.jpg', contentType: MediaType('image', 'jpeg')));
+      if (lateralI  != null) request.files.add(http.MultipartFile.fromBytes('lateral_i', lateralI,  filename: 'lateral_i.jpg', contentType: MediaType('image', 'jpeg')));
+      if (posterior != null) request.files.add(http.MultipartFile.fromBytes('posterior', posterior, filename: 'posterior.jpg', contentType: MediaType('image', 'jpeg')));
       for (int i = 0; i < _vistasPersonalizadas.length; i++) {
         final v = _vistasPersonalizadas[i];
         final bytes = v['bytes'] as Uint8List;
         final comentario = v['comentario'] as String? ?? '';
-        request.files.add(http.MultipartFile.fromBytes('personalizada_$i', bytes, filename: 'personalizada_$i.png', contentType: MediaType('image', 'png')));
+        request.files.add(http.MultipartFile.fromBytes('personalizada_$i', bytes, filename: 'personalizada_$i.jpg', contentType: MediaType('image', 'jpeg')));
         if (comentario.isNotEmpty) request.fields['comentario_$i'] = comentario;
       }
 
