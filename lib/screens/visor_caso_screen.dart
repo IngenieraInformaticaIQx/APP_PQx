@@ -2257,6 +2257,8 @@ import { EffectComposer }  from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass }      from 'three/addons/postprocessing/RenderPass.js';
 import { OutlinePass }     from 'three/addons/postprocessing/OutlinePass.js';
 import { OutputPass }      from 'three/addons/postprocessing/OutputPass.js';
+import { ShaderPass }      from 'three/addons/postprocessing/ShaderPass.js';
+import { FXAAShader }      from 'three/addons/shaders/FXAAShader.js';
 
 const _isMob = /iPhone|iPad|Android/i.test(navigator.userAgent) ||
                (/MacIntel|MacARM/.test(navigator.platform) && navigator.maxTouchPoints > 1);
@@ -2270,9 +2272,7 @@ const camera = new THREE.PerspectiveCamera(45, innerWidth/innerHeight, 0.1, 2000
 camera.position.set(0,0,500);
 
 const renderer = new THREE.WebGLRenderer({antialias:true, alpha:true, logarithmicDepthBuffer:true, preserveDrawingBuffer:true});
-renderer.setPixelRatio(_isMob
-  ? Math.min(devicePixelRatio, 1.5)  // móvil: limitar DPR para reducir carga GPU
-  : Math.min(devicePixelRatio, 2));
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.setSize(innerWidth, innerHeight);
 renderer.setClearColor(0x000000, 0);
 renderer.shadowMap.enabled = true;
@@ -2305,7 +2305,7 @@ const _dpr = renderer.getPixelRatio();
 const _rt = new THREE.WebGLRenderTarget(Math.floor(innerWidth*_dpr), Math.floor(innerHeight*_dpr), {
   format: THREE.RGBAFormat,
   type: THREE.UnsignedByteType,
-  samples: _isMob ? 2 : 4,
+  samples: 4,
 });
 _rt.texture.colorSpace = THREE.NoColorSpace;
 const composer = new EffectComposer(renderer, _rt);
@@ -2320,6 +2320,9 @@ outlinePass.pulsePeriod   = 0;
 outlinePass.visibleEdgeColor.set(0x2A7FF5);
 outlinePass.hiddenEdgeColor.set(0x1A5FD8);
 composer.addPass(outlinePass);
+const fxaaPass = new ShaderPass(FXAAShader);
+fxaaPass.uniforms['resolution'].value.set(1/(innerWidth*_dpr), 1/(innerHeight*_dpr));
+composer.addPass(fxaaPass);
 const _op = new OutputPass();
 _op.material.transparent = true;
 composer.addPass(_op);
@@ -5180,6 +5183,7 @@ window.addEventListener('resize',()=>{
   renderer.setSize(innerWidth,innerHeight);
   composer.setSize(Math.floor(innerWidth*_r),Math.floor(innerHeight*_r));
   outlinePass.resolution.set(innerWidth,innerHeight);
+  fxaaPass.uniforms['resolution'].value.set(1/(innerWidth*_r), 1/(innerHeight*_r));
   needsRender = true;
 });
 window._numBiomodelos = 0;
