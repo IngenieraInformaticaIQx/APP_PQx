@@ -1,9 +1,12 @@
 import 'package:flutter/foundation.dart'
-    show TargetPlatform, defaultTargetPlatform, kIsWeb;
+    show TargetPlatform, defaultTargetPlatform, kIsWeb, Factory;
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:untitled/services/app_theme.dart';
+import 'package:webview_flutter/webview_flutter.dart';
+import 'package:http/http.dart' as http;
 import 'login_screen.dart';
 import 'casos_screen.dart';
 import 'visor_selector_screen.dart';
@@ -190,6 +193,7 @@ class _MenuScreenState extends State<MenuScreen>
     _loadUltimoCaso();
     _startFraseTimer();
     WidgetsBinding.instance.addObserver(this);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _checkPrivacyVersion());
   }
 
   @override
@@ -246,6 +250,247 @@ class _MenuScreenState extends State<MenuScreen>
     _fraseController.dispose();
     _fraseTimer?.cancel();
     super.dispose();
+  }
+
+  static const _privacyUrl = 'https://profesional.planificacionquirurgica.com/privacy.html';
+  static const _privacyVersionKey = 'privacy_last_modified';
+
+  Future<void> _checkPrivacyVersion() async {
+    if (!mounted) return;
+    try {
+      final response = await http.head(Uri.parse(_privacyUrl))
+          .timeout(const Duration(seconds: 6));
+      final serverVersion = response.headers['last-modified'] ?? '';
+      if (serverVersion.isEmpty) return;
+
+      final prefs = await SharedPreferences.getInstance();
+      final acceptedVersion = prefs.getString(_privacyVersionKey) ?? '';
+
+      if (serverVersion != acceptedVersion && mounted) {
+        await _mostrarPrivacyBloqueante(serverVersion);
+      }
+    } catch (e) {
+      debugPrint('PRIVACY check error: $e');
+    }
+  }
+
+  bool get _webViewDisponible {
+    if (kIsWeb) return false;
+    switch (defaultTargetPlatform) {
+      case TargetPlatform.android:
+      case TargetPlatform.iOS:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  Future<void> _mostrarPrivacyBloqueante(String serverVersion) async {
+    if (!_webViewDisponible) {
+      await _mostrarPrivacyDesktop(serverVersion);
+      return;
+    }
+
+    final reachedBottom = ValueNotifier<bool>(false);
+
+    late final WebViewController controller;
+    controller = WebViewController()
+      ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..addJavaScriptChannel(
+        'ScrollChannel',
+        onMessageReceived: (_) => reachedBottom.value = true,
+      )
+      ..setNavigationDelegate(NavigationDelegate(
+        onPageFinished: (_) {
+          controller.runJavaScript('''
+            window.addEventListener('scroll', function() {
+              if ((window.innerHeight + window.scrollY) >= document.body.offsetHeight - 80) {
+                ScrollChannel.postMessage('bottom');
+              }
+            });
+          ''');
+        },
+      ))
+      ..loadRequest(Uri.parse(_privacyUrl));
+
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      isDismissible: false,
+      enableDrag: false,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => PopScope(
+        canPop: false,
+        child: ClipRRect(
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+            child: Container(
+              height: MediaQuery.of(ctx).size.height * 0.90,
+              decoration: BoxDecoration(
+                color: AppTheme.sheetBg,
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+                border: Border.all(color: AppTheme.sheetBorder, width: 1.2),
+              ),
+              child: Column(children: [
+                const SizedBox(height: 12),
+                Container(width: 40, height: 4,
+                  decoration: BoxDecoration(
+                    color: AppTheme.handleColor,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: Row(children: [
+                    const Icon(Icons.privacy_tip_outlined, color: Color(0xFF2A7FF5), size: 18),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text('Política de privacidad actualizada',
+                          style: TextStyle(color: AppTheme.darkText,
+                              fontSize: 15, fontWeight: FontWeight.w800)),
+                    ),
+                  ]),
+                ),
+                const SizedBox(height: 4),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: Text(
+                    'Hemos actualizado nuestra política. Debes leerla y aceptarla para continuar.',
+                    style: TextStyle(color: AppTheme.subtitleColor, fontSize: 12),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Expanded(
+                  child: WebViewWidget(
+                    controller: controller,
+                    gestureRecognizers: {
+                      Factory<VerticalDragGestureRecognizer>(
+                          () => VerticalDragGestureRecognizer()),
+                    },
+                  ),
+                ),
+                ValueListenableBuilder<bool>(
+                  valueListenable: reachedBottom,
+                  builder: (_, reached, __) => Padding(
+                    padding: EdgeInsets.fromLTRB(20, 12, 20,
+                        12 + MediaQuery.of(ctx).viewInsets.bottom),
+                    child: GestureDetector(
+                      onTap: reached
+                          ? () async {
+                              final prefs = await SharedPreferences.getInstance();
+                              await prefs.setString(_privacyVersionKey, serverVersion);
+                              if (mounted) Navigator.pop(ctx);
+                            }
+                          : null,
+                      child: Container(
+                        width: double.infinity,
+                        height: 52,
+                        decoration: BoxDecoration(
+                          gradient: reached
+                              ? const LinearGradient(
+                                  colors: [Color(0xFF34A853), Color(0xFF81C995)],
+                                  begin: Alignment.centerLeft,
+                                  end: Alignment.centerRight)
+                              : null,
+                          color: reached ? null : AppTheme.cardBg1,
+                          borderRadius: BorderRadius.circular(18),
+                          border: Border.all(
+                            color: reached
+                                ? const Color(0xFF34A853).withOpacity(0.6)
+                                : AppTheme.cardBorder,
+                            width: 1.5,
+                          ),
+                        ),
+                        child: Center(
+                          child: Text(
+                            reached ? 'Acepto la política de privacidad' : 'Desplázate hasta el final',
+                            style: TextStyle(
+                              color: reached ? Colors.white : AppTheme.subtitleColor,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ]),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _mostrarPrivacyDesktop(String serverVersion) async {
+    bool aceptado = false;
+    await showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => PopScope(
+        canPop: false,
+        child: AlertDialog(
+          backgroundColor: AppTheme.sheetBg,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: Row(children: [
+            const Icon(Icons.privacy_tip_outlined, color: Color(0xFF2A7FF5), size: 20),
+            const SizedBox(width: 8),
+            Expanded(child: Text('Política de privacidad actualizada',
+                style: TextStyle(color: AppTheme.darkText, fontSize: 15, fontWeight: FontWeight.w800))),
+          ]),
+          content: Column(mainAxisSize: MainAxisSize.min, children: [
+            Text(
+              'Hemos actualizado nuestra política de privacidad. Debes leerla y aceptarla para continuar usando la app.',
+              style: TextStyle(color: AppTheme.subtitleColor, fontSize: 13, height: 1.5),
+            ),
+            const SizedBox(height: 16),
+            GestureDetector(
+              onTap: () => launchUrl(Uri.parse(_privacyUrl), mode: LaunchMode.externalApplication),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF2A7FF5).withOpacity(0.08),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFF2A7FF5).withOpacity(0.25)),
+                ),
+                child: Row(children: [
+                  const Icon(Icons.open_in_new_rounded, color: Color(0xFF2A7FF5), size: 16),
+                  const SizedBox(width: 8),
+                  Text('Leer política de privacidad',
+                      style: const TextStyle(color: Color(0xFF2A7FF5),
+                          fontSize: 13, fontWeight: FontWeight.w600)),
+                ]),
+              ),
+            ),
+          ]),
+          actions: [
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF34A853),
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                ),
+                onPressed: () {
+                  aceptado = true;
+                  Navigator.pop(ctx);
+                },
+                child: const Text('He leído y acepto', style: TextStyle(fontWeight: FontWeight.w700)),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (aceptado) {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_privacyVersionKey, serverVersion);
+    }
   }
 
   void _cerrarSesion() async {
