@@ -644,6 +644,17 @@ class _MenuScreenState extends State<MenuScreen>
                     ),
                   ),
                 ),
+                const SizedBox(height: 16),
+                Text(
+                  'v1.0 Beta',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: AppTheme.subtitleColor.withOpacity(0.45),
+                    fontSize: 11,
+                    fontWeight: FontWeight.w500,
+                    letterSpacing: 0.5,
+                  ),
+                ),
               ]),
             ),
           ),
