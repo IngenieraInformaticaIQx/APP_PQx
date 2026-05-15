@@ -358,6 +358,31 @@ class _MenuScreenState extends State<MenuScreen>
                   ),
                 ),
                 const SizedBox(height: 12),
+                // ── Política de privacidad ──
+                ClipRRect(borderRadius: BorderRadius.circular(16),
+                  child: BackdropFilter(filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: AppTheme.cardBg1,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: AppTheme.cardBorder),
+                      ),
+                      child: ListTile(
+                        leading: Icon(Icons.privacy_tip_outlined, color: AppTheme.subtitleColor),
+                        title: Text('Política de privacidad',
+                            style: TextStyle(color: AppTheme.darkText, fontWeight: FontWeight.w600)),
+                        onTap: () {
+                          Navigator.pop(context);
+                          launchUrl(
+                            Uri.parse('https://profesional.planificacionquirurgica.com/privacy.html'),
+                            mode: LaunchMode.externalApplication,
+                          );
+                        },
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
                 // ── Cerrar sesión ──
                 ClipRRect(borderRadius: BorderRadius.circular(16),
                   child: BackdropFilter(filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),

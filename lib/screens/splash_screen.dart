@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:untitled/services/app_theme.dart';
 import 'login_screen.dart';
-import 'onboarding_screen.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -87,26 +86,13 @@ class _SplashScreenState extends State<SplashScreen>
     await _exitCtrl.forward();
 
     if (mounted) {
-      final prefs = await SharedPreferences.getInstance();
-      final visto = prefs.getBool('onboarding_visto') ?? false;
-      if (!mounted) return;
-      if (!visto) {
-        Navigator.pushReplacement(
-          context,
-          PageRouteBuilder(
-            pageBuilder: (_, __, ___) => const OnboardingScreen(),
-            transitionDuration: Duration.zero,
-          ),
-        );
-      } else {
-        Navigator.pushReplacement(
-          context,
-          PageRouteBuilder(
-            pageBuilder: (_, __, ___) => const LoginScreen(),
-            transitionDuration: Duration.zero,
-          ),
-        );
-      }
+      Navigator.pushReplacement(
+        context,
+        PageRouteBuilder(
+          pageBuilder: (_, __, ___) => const LoginScreen(),
+          transitionDuration: Duration.zero,
+        ),
+      );
     }
   }
 
