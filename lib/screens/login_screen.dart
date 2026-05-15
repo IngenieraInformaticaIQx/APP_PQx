@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'menu_screen.dart' if (dart.library.html) 'menu_screen_web.dart';
+import 'onboarding_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'dart:ui';
@@ -83,9 +84,12 @@ class _LoginScreenState extends State<LoginScreen>
       if (email.isNotEmpty && pass.isNotEmpty) {
         if (mounted) {
           await _guardarTokenEnServidor(_normalizarGrupo(email));
+          final visto = prefs.getBool('onboarding_visto') ?? false;
           Navigator.pushReplacement(
             context,
-            MaterialPageRoute(builder: (_) => const MenuScreen()),
+            MaterialPageRoute(
+              builder: (_) => visto ? const MenuScreen() : const OnboardingScreen(),
+            ),
           );
           return;
         }
@@ -176,9 +180,12 @@ class _LoginScreenState extends State<LoginScreen>
         await prefs.setBool('remember_me', _rememberMe);
         await _guardarTokenEnServidor(_normalizarGrupo(email));
         if (mounted) {
+          final visto = prefs.getBool('onboarding_visto') ?? false;
           Navigator.pushReplacement(
             context,
-            MaterialPageRoute(builder: (_) => const MenuScreen()),
+            MaterialPageRoute(
+              builder: (_) => visto ? const MenuScreen() : const OnboardingScreen(),
+            ),
           );
         }
       } else {
@@ -620,14 +627,61 @@ class _LoginScreenState extends State<LoginScreen>
 
                             // ¿Olvidaste la contraseña?
                             TextButton(
-                              onPressed: () =>
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(
-                                      content: Text(
-                                        'Contacta con PQx para crear un acceso o recuperar contraseña',
+                              onPressed: () {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    behavior: SnackBarBehavior.floating,
+                                    backgroundColor: Colors.transparent,
+                                    elevation: 0,
+                                    margin: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+                                    duration: const Duration(seconds: 4),
+                                    content: ClipRRect(
+                                      borderRadius: BorderRadius.circular(16),
+                                      child: BackdropFilter(
+                                        filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+                                        child: Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                                          decoration: BoxDecoration(
+                                            color: AppTheme.cardBg1,
+                                            borderRadius: BorderRadius.circular(16),
+                                            border: Border.all(color: AppTheme.cardBorder, width: 1.2),
+                                            boxShadow: [
+                                              BoxShadow(
+                                                color: Colors.black.withOpacity(0.18),
+                                                blurRadius: 20,
+                                                offset: const Offset(0, 6),
+                                              ),
+                                            ],
+                                          ),
+                                          child: Row(children: [
+                                            Container(
+                                              width: 36, height: 36,
+                                              decoration: BoxDecoration(
+                                                color: _accent.withOpacity(0.12),
+                                                borderRadius: BorderRadius.circular(10),
+                                              ),
+                                              child: const Icon(Icons.info_outline_rounded,
+                                                  color: Color(0xFF2A7FF5), size: 18),
+                                            ),
+                                            const SizedBox(width: 12),
+                                            Expanded(
+                                              child: Text(
+                                                'Contacta con PQx para crear un acceso o recuperar tu contraseña',
+                                                style: TextStyle(
+                                                  color: AppTheme.darkText,
+                                                  fontSize: 13,
+                                                  fontWeight: FontWeight.w500,
+                                                  height: 1.4,
+                                                ),
+                                              ),
+                                            ),
+                                          ]),
+                                        ),
                                       ),
                                     ),
                                   ),
+                                );
+                              },
                               child: Text(
                                 '¿No tienes acceso u olvidaste la contraseña?',
                                 style: TextStyle(

@@ -1,8 +1,12 @@
 import 'dart:ui';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:untitled/services/app_theme.dart';
+import 'package:webview_flutter/webview_flutter.dart';
 import 'login_screen.dart';
+import 'menu_screen.dart' if (dart.library.html) 'menu_screen_web.dart';
 
 class OnboardingScreen extends StatefulWidget {
   final bool fromPerfil;
@@ -15,6 +19,7 @@ class OnboardingScreen extends StatefulWidget {
 class _OnboardingScreenState extends State<OnboardingScreen> {
   final _ctrl = PageController();
   int _page = 0;
+  bool _accepted = false;
 
   static const _accent = Color(0xFF2A7FF5);
 
@@ -145,6 +150,141 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     ),
   ];
 
+  Future<void> _mostrarTerminos() async {
+    final reachedBottom = ValueNotifier<bool>(false);
+
+    late final WebViewController controller;
+    controller = WebViewController()
+      ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..addJavaScriptChannel(
+        'ScrollChannel',
+        onMessageReceived: (_) => reachedBottom.value = true,
+      )
+      ..setNavigationDelegate(NavigationDelegate(
+        onPageFinished: (_) {
+          controller.runJavaScript('''
+            window.addEventListener('scroll', function() {
+              if ((window.innerHeight + window.scrollY) >= document.body.offsetHeight - 80) {
+                ScrollChannel.postMessage('bottom');
+              }
+            });
+          ''');
+        },
+      ))
+      ..loadRequest(Uri.parse('https://profesional.planificacionquirurgica.com/privacy.html'));
+
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => ClipRRect(
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+          child: Container(
+            height: MediaQuery.of(ctx).size.height * 0.88,
+            decoration: BoxDecoration(
+              color: AppTheme.sheetBg,
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+              border: Border.all(color: AppTheme.sheetBorder, width: 1.2),
+            ),
+            child: Column(children: [
+              const SizedBox(height: 12),
+              Container(width: 40, height: 4,
+                decoration: BoxDecoration(
+                  color: AppTheme.handleColor,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: Row(children: [
+                  const Icon(Icons.privacy_tip_outlined, color: Color(0xFF2A7FF5), size: 18),
+                  const SizedBox(width: 8),
+                  Text('Política de privacidad',
+                      style: TextStyle(color: AppTheme.darkText,
+                          fontSize: 16, fontWeight: FontWeight.w800)),
+                  const Spacer(),
+                  GestureDetector(
+                    onTap: () => Navigator.pop(ctx),
+                    child: Icon(Icons.close, color: AppTheme.subtitleColor, size: 20),
+                  ),
+                ]),
+              ),
+              const SizedBox(height: 4),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: ValueListenableBuilder<bool>(
+                  valueListenable: reachedBottom,
+                  builder: (_, reached, __) => Text(
+                    reached ? '' : 'Desplázate hasta el final para aceptar',
+                    style: TextStyle(color: AppTheme.subtitleColor, fontSize: 11),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Expanded(
+                child: WebViewWidget(
+                  controller: controller,
+                  gestureRecognizers: {
+                    Factory<VerticalDragGestureRecognizer>(
+                        () => VerticalDragGestureRecognizer()),
+                  },
+                ),
+              ),
+              ValueListenableBuilder<bool>(
+                valueListenable: reachedBottom,
+                builder: (_, reached, __) => Padding(
+                  padding: EdgeInsets.fromLTRB(20, 12, 20,
+                      12 + MediaQuery.of(ctx).viewInsets.bottom),
+                  child: GestureDetector(
+                    onTap: reached
+                        ? () {
+                            setState(() => _accepted = true);
+                            Navigator.pop(ctx);
+                          }
+                        : null,
+                    child: Container(
+                      width: double.infinity,
+                      height: 52,
+                      decoration: BoxDecoration(
+                        gradient: reached
+                            ? const LinearGradient(
+                                colors: [Color(0xFF34A853), Color(0xFF81C995)],
+                                begin: Alignment.centerLeft,
+                                end: Alignment.centerRight)
+                            : null,
+                        color: reached ? null : AppTheme.cardBg1,
+                        borderRadius: BorderRadius.circular(18),
+                        border: Border.all(
+                          color: reached
+                              ? const Color(0xFF34A853).withOpacity(0.6)
+                              : AppTheme.cardBorder,
+                          width: 1.5,
+                        ),
+                      ),
+                      child: Center(
+                        child: Text(
+                          reached ? 'Acepto la política de privacidad' : 'Desplázate hasta el final',
+                          style: TextStyle(
+                            color: reached ? Colors.white : AppTheme.subtitleColor,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
+
   Future<void> _finalizar() async {
     if (!widget.fromPerfil) {
       final prefs = await SharedPreferences.getInstance();
@@ -152,7 +292,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       if (mounted) {
         Navigator.pushReplacement(
           context,
-          MaterialPageRoute(builder: (_) => const LoginScreen()),
+          MaterialPageRoute(builder: (_) => const MenuScreen()),
         );
       }
     } else {
@@ -220,7 +360,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                   ),
                 ),
                 const Spacer(),
-                if (!isLast)
+                if (!isLast && widget.fromPerfil)
                   GestureDetector(
                     onTap: _finalizar,
                     child: Text('Saltar',
@@ -263,6 +403,73 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             ),
             const SizedBox(height: 20),
 
+            // ── Botón leer términos (solo último slide) ───────────────────
+            if (isLast)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(24, 0, 24, 12),
+                child: Column(
+                  children: [
+                    GestureDetector(
+                      onTap: _accepted ? null : _mostrarTerminos,
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(16),
+                        child: BackdropFilter(
+                          filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                            decoration: BoxDecoration(
+                              color: _accepted
+                                  ? const Color(0xFF34A853).withOpacity(0.10)
+                                  : _accent.withOpacity(0.08),
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(
+                                color: _accepted
+                                    ? const Color(0xFF34A853).withOpacity(0.40)
+                                    : _accent.withOpacity(0.25),
+                                width: 1.2,
+                              ),
+                            ),
+                            child: Row(children: [
+                              Icon(
+                                _accepted ? Icons.check_circle_rounded : Icons.privacy_tip_outlined,
+                                color: _accepted ? const Color(0xFF34A853) : _accent,
+                                size: 20,
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Text(
+                                  _accepted
+                                      ? 'Política de privacidad aceptada'
+                                      : 'Leer y aceptar la política de privacidad',
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
+                                    color: _accepted ? const Color(0xFF34A853) : _accent,
+                                  ),
+                                ),
+                              ),
+                              if (!_accepted)
+                                Icon(Icons.arrow_forward_ios_rounded, size: 13, color: _accent.withOpacity(0.6)),
+                            ]),
+                          ),
+                        ),
+                      ),
+                    ),
+                    if (!_accepted) ...[
+                      const SizedBox(height: 6),
+                      Text(
+                        'Debes aceptar la política de privacidad para poder comenzar',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: AppTheme.subtitleColor.withOpacity(0.6),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+
             // ── Botones ───────────────────────────────────────────────────
             Padding(
               padding: const EdgeInsets.fromLTRB(24, 0, 24, 28),
@@ -295,7 +502,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 Expanded(
                   child: GestureDetector(
                     onTap: isLast
-                        ? _finalizar
+                        ? (_accepted ? _finalizar : null)
                         : () => _ctrl.nextPage(
                             duration: const Duration(milliseconds: 300),
                             curve: Curves.easeInOut),
@@ -306,30 +513,37 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                         child: Container(
                           height: 52,
                           decoration: BoxDecoration(
-                            gradient: isLast
+                            gradient: isLast && _accepted
                                 ? const LinearGradient(
                                     colors: [_accent, Color(0xFF5BA8FF)],
                                     begin: Alignment.centerLeft,
                                     end: Alignment.centerRight)
                                 : null,
-                            color: isLast ? null : AppTheme.cardBg1,
+                            color: isLast && _accepted ? null : AppTheme.cardBg1,
                             borderRadius: BorderRadius.circular(22),
                             border: Border.all(
-                              color: isLast
-                                  ? _accent.withOpacity(0.6)
-                                  : AppTheme.cardBorder,
+                              color: isLast && !_accepted
+                                  ? AppTheme.cardBorder.withOpacity(0.3)
+                                  : isLast
+                                      ? _accent.withOpacity(0.6)
+                                      : AppTheme.cardBorder,
                               width: 1.5,
                             ),
                           ),
-                          child: Center(
+                          child: Opacity(
+                            opacity: isLast && !_accepted ? 0.35 : 1.0,
+                            child: Center(
                             child: Text(
                               isLast ? 'Empezar' : 'Siguiente',
                               style: TextStyle(
-                                color: isLast ? Colors.white : AppTheme.darkText,
+                                color: isLast && _accepted
+                                    ? Colors.white
+                                    : AppTheme.darkText,
                                 fontSize: 15,
                                 fontWeight: FontWeight.w700,
                               ),
                             ),
+                          ),
                           ),
                         ),
                       ),
