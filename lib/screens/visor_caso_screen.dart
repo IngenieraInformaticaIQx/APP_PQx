@@ -425,7 +425,7 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
 
   // Tap pendiente para mostrar popup
   _TapData? _tapPendiente;
-  bool _guiasVisibles = true;
+  bool _guiasVisibles = false;
   TornilloColocado? _screwInfoTc;
   double _screwInfoSx = 0, _screwInfoSy = 0;
   bool _planGuardado  = false;
@@ -1431,7 +1431,7 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
         _descargarYCargarGlb(idx);
       }
       // Las trayectorias arrancan invisibles tras cargar — aplicar estado correcto con delay
-      final trayVis = _trayectoriasVis[idx] ?? true;
+      final trayVis = _trayectoriasVis[idx] ?? false;
       final mostrarGuias = trayVis && _guiasVisibles;
       Future.delayed(const Duration(milliseconds: 400), () {
         if (mounted) _jsToggleTrayectoriasGlb(idx, mostrarGuias);
@@ -2847,7 +2847,7 @@ function cargarGlbBase64(id, b64){
           if(c.isMesh && c.material){
             c.material = c.material.clone();
             c.material.transparent = true;
-            c.material.opacity = 0.45;
+            c.material.opacity = 0;
             c.material.depthWrite = false;
             c.material.needsUpdate = true;
           }
@@ -3348,7 +3348,11 @@ function _setTrayectoriaOcupada(placaGlbId, cilindroId, cilindroNombre, ocupada)
   const key = _trayectoriaKey(target);
   if(ocupada) _trayectoriasOcupadas.add(key);
   else _trayectoriasOcupadas.delete(key);
-  target.visible = !ocupada && _guiasGlobalVisible && _trayectoriaGlbVisible(target);
+  if(target.isMesh && target.material){
+    const mostrar = !ocupada && _guiasGlobalVisible && _trayectoriaGlbVisible(target);
+    target.material.opacity = mostrar ? 0.45 : 0;
+    target.material.needsUpdate = true;
+  }
 }
 
 function _trayectoriaGlbVisible(obj){
@@ -3367,9 +3371,13 @@ function toggleGlb(id,v){
   if(v){
     modelos[id].visible = true;
     modelos[id].traverse(c=>{
-      c.visible = c.userData.esTrayectoria
-        ? _guiasGlobalVisible && _trayectoriaGlbVisible(c) && !_trayectoriasOcupadas.has(_trayectoriaKey(c))
-        : true;
+      if(c.userData.esTrayectoria && c.isMesh && c.material){
+        const ocupada = _trayectoriasOcupadas.has(_trayectoriaKey(c));
+        c.material.opacity = (_guiasGlobalVisible && !ocupada) ? 0.45 : 0;
+        c.material.needsUpdate = true;
+      } else {
+        c.visible = true;
+      }
     });
     if(modelos[id].userData && modelos[id].userData.esHueso){
       if(_cotasRxPorModelo[id]){
@@ -3391,14 +3399,28 @@ function toggleGlb(id,v){
 }
 function toggleGuias(v){
   _guiasGlobalVisible = v;
-  scene.traverse(c=>{ if(c.userData.esTrayectoria) c.visible=v && !_trayectoriasOcupadas.has(_trayectoriaKey(c)); });
+  scene.traverse(c=>{
+    if(c.userData.esTrayectoria && c.isMesh && c.material){
+      const ocupada = _trayectoriasOcupadas.has(_trayectoriaKey(c));
+      c.material.opacity = (v && !ocupada) ? 0.45 : 0;
+      c.material.needsUpdate = true;
+    }
+  });
   _invalidarCacheMeshes();
+  needsRender = true;
 }
 function toggleTrayectoriasGlb(id, v){
   if(!modelos[id]) return;
   _trayectoriasGlbVisibles[id] = v;
-  modelos[id].traverse(c=>{ if(c.userData.esTrayectoria) c.visible=v && _guiasGlobalVisible && !_trayectoriasOcupadas.has(_trayectoriaKey(c)); });
+  modelos[id].traverse(c=>{
+    if(c.userData.esTrayectoria && c.isMesh && c.material){
+      const ocupada = _trayectoriasOcupadas.has(_trayectoriaKey(c));
+      c.material.opacity = (v && _guiasGlobalVisible && !ocupada) ? 0.45 : 0;
+      c.material.needsUpdate = true;
+    }
+  });
   _invalidarCacheMeshes();
+  needsRender = true;
 }
 function setOpacidad(id,op){
   if(!modelos[id]) return;
@@ -7553,18 +7575,18 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
               _jsToggleGuias(_guiasVisibles);
             },
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
               decoration: BoxDecoration(
                 color: _guiasVisibles ? _C.accentScrew.withOpacity(0.2) : Colors.transparent,
-                borderRadius: BorderRadius.circular(8),
+                borderRadius: BorderRadius.circular(10),
                 border: Border.all(color: _guiasVisibles ? _C.accentScrew.withOpacity(0.5) : AppTheme.handleColor),
               ),
               child: Row(mainAxisSize: MainAxisSize.min, children: [
-                Icon(Icons.linear_scale, size: 10, color: _guiasVisibles ? _C.accentScrew : AppTheme.subtitleColor),
-                const SizedBox(width: 4),
-                Text('Guías', style: TextStyle(
+                Icon(Icons.linear_scale, size: 12, color: _guiasVisibles ? _C.accentScrew : AppTheme.subtitleColor),
+                const SizedBox(width: 5),
+                Text('Trayectorias', style: TextStyle(
                   color: _guiasVisibles ? _C.accentScrew : AppTheme.subtitleColor,
-                  fontSize: 9, fontWeight: FontWeight.w600)),
+                  fontSize: 11, fontWeight: FontWeight.w600)),
               ]),
             ),
           ),
@@ -8012,7 +8034,7 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
                                 ? const Color(0xFF2196F3)
                                 : AppTheme.subtitleColor),
                         const SizedBox(width: 4),
-                        Text('Guías',
+                        Text('Trayectorias',
                             style: TextStyle(
                                 fontSize: 9, fontWeight: FontWeight.w600,
                                 color: trayVis
