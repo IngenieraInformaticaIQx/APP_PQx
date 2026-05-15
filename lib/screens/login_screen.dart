@@ -702,6 +702,19 @@ class _LoginScreenState extends State<LoginScreen>
               ),
             ),
           ),
+
+          // ── Versión Beta ──────────────────────────────────────────────────
+          Positioned(
+            top: 48,
+            right: 20,
+            child: Text(
+              'v1.0 Beta',
+              style: TextStyle(
+                color: _dark.withOpacity(0.35),
+                fontSize: 12,
+              ),
+            ),
+          ),
         ],
       ),
     );
