@@ -1,14 +1,23 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+/// Gestor global del tema visual (claro / oscuro) de la app.
+///
+/// Todos los colores son getters reactivos: al cambiar [isDark] los widgets
+/// que escuchan el [ValueNotifier] se reconstruyen automáticamente sin
+/// necesidad de un state manager externo.
 class AppTheme {
+  /// Notifier que indica si el tema oscuro está activo.
+  /// Escúchalo con [ValueListenableBuilder] para reconstruir la UI al cambiar.
   static final ValueNotifier<bool> isDark = ValueNotifier(false);
 
+  /// Carga la preferencia de tema desde SharedPreferences al arrancar la app.
   static Future<void> load() async {
     final prefs = await SharedPreferences.getInstance();
     isDark.value = prefs.getBool('dark_mode') ?? false;
   }
 
+  /// Alterna entre tema claro y oscuro y persiste la elección.
   static Future<void> toggle() async {
     isDark.value = !isDark.value;
     final prefs = await SharedPreferences.getInstance();

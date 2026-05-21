@@ -10,6 +10,12 @@ import 'package:untitled/services/app_theme.dart';
 
 // Los modelos GlbArchivo y CasoMedico están definidos en visor_caso_screen.dart
 
+/// Lista todos los casos quirúrgicos del médico autenticado.
+///
+/// Obtiene los datos de [_apiUrl] usando Basic Auth y presenta cada caso
+/// como una card animada. Permite abrir el [VisorCasoScreen] o el
+/// [DetalleCasoScreen] de cada caso. El estado del caso puede sobreescribirse
+/// localmente via SharedPreferences (clave `estado_local_{id}`).
 class CasosScreen extends StatefulWidget {
   final VoidCallback? onVolverAlMenu;
   const CasosScreen({super.key, this.onVolverAlMenu});
@@ -95,6 +101,9 @@ class _CasosScreenState extends State<CasosScreen>
   }
 
   // ── Lógica de negocio ─────────────────────────────────────────────────────
+  /// Llama a la API, parsea la lista de [CasoMedico] y lanza las animaciones
+  /// de entrada escalonadas. Fusiona el estado local guardado en SharedPreferences
+  /// con los datos del servidor para preservar cambios offline.
   Future<void> _cargarCasos() async {
     setState(() { _loading = true; _error = null; });
 
@@ -181,6 +190,7 @@ class _CasosScreenState extends State<CasosScreen>
     }
   }
 
+  /// Devuelve el color primario asociado al estado de un caso.
   Color _estadoColor(String estado) {
     switch (estado) {
       case 'validado':   return const Color(0xFF34A853);
@@ -191,6 +201,7 @@ class _CasosScreenState extends State<CasosScreen>
     }
   }
 
+  /// Devuelve el color secundario (más claro) del estado para degradados.
   Color _estadoColorLight(String estado) {
     switch (estado) {
       case 'validado':   return const Color(0xFF81C995);

@@ -5,6 +5,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:untitled/services/app_theme.dart';
 import 'login_screen.dart';
 
+/// Pantalla de bienvenida que se muestra al arrancar la app.
+/// Ejecuta una secuencia de animaciones (logo, título, subtítulo)
+/// y navega automáticamente a [LoginScreen] al terminar.
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
 
@@ -41,6 +44,7 @@ class _SplashScreenState extends State<SplashScreen>
 
   static const _accent = Color(0xFF2A7FF5);
 
+  /// Inicializa todos los [AnimationController] y arranca la secuencia.
   @override
   void initState() {
     super.initState();
@@ -71,6 +75,7 @@ class _SplashScreenState extends State<SplashScreen>
     _runSequence();
   }
 
+  /// Ejecuta la secuencia de animaciones en orden y navega a [LoginScreen].
   Future<void> _runSequence() async {
     await Future.delayed(const Duration(milliseconds: 100));
     _logoCtrl.forward();

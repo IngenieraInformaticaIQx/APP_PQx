@@ -9,6 +9,12 @@ import 'package:webview_flutter/webview_flutter.dart';
 import 'login_screen.dart';
 import 'menu_screen.dart' if (dart.library.html) 'menu_screen_web.dart';
 
+/// Tutorial de bienvenida que se muestra una sola vez tras el primer login.
+///
+/// Presenta slides explicativos de las funcionalidades de la app y obliga
+/// al usuario a leer y aceptar la política de privacidad antes de continuar.
+/// Si [fromPerfil] es true, se puede acceder desde el perfil y no redirige
+/// al menú al finalizar (solo muestra la info y cierra).
 class OnboardingScreen extends StatefulWidget {
   final bool fromPerfil;
   const OnboardingScreen({super.key, this.fromPerfil = false});
@@ -286,6 +292,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     );
   }
 
+  /// Marca el onboarding como visto, guarda la versión actual de la política
+  /// de privacidad (evita que el menú la vuelva a pedir) y navega a [MenuScreen].
   Future<void> _finalizar() async {
     if (!widget.fromPerfil) {
       final prefs = await SharedPreferences.getInstance();

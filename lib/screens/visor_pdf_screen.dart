@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_pdfview/flutter_pdfview.dart';
 import 'package:untitled/services/app_theme.dart';
 
+/// Pantalla de visualización de documentos PDF del caso.
+/// Usa [flutter_pdfview] para renderizar el PDF local y muestra un paginador en el header.
 class VisorPdfScreen extends StatefulWidget {
   final String rutaLocal;
   final String nombre;

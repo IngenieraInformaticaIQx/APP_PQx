@@ -6,6 +6,11 @@ import 'package:untitled/services/audio_notas_service.dart';
 import 'visor_caso_screen.dart';
 import 'archivos_caso_screen.dart';
 
+/// Pantalla de detalle de un [CasoMedico]: muestra metadatos, estado,
+/// modelos disponibles y acciones rápidas (abrir visor, cambiar estado).
+///
+/// [onEstadoCambiado] se invoca al cambiar el estado para que la pantalla
+/// padre ([CasosScreen]) pueda actualizar su lista sin recargar la API.
 class DetalleCasoScreen extends StatefulWidget {
   final CasoMedico caso;
   final void Function(String nuevoEstado)? onEstadoCambiado;

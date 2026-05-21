@@ -12,6 +12,11 @@ import 'package:untitled/services/notas_caso_service.dart';
 import 'visor_caso_screen.dart';
 import 'visor_pdf_screen.dart';
 
+/// Pantalla de gestión de archivos y notas adjuntos a un [CasoMedico].
+///
+/// Descarga el listado de archivos del servidor (PDFs, imágenes, modelos)
+/// y los presenta agrupados por tipo. También gestiona las notas de texto
+/// del caso via [NotasCasoService].
 class ArchivosCasoScreen extends StatefulWidget {
   final CasoMedico caso;
   const ArchivosCasoScreen({super.key, required this.caso});
@@ -64,11 +69,13 @@ class _ArchivosCasoScreenState extends State<ArchivosCasoScreen>
     super.dispose();
   }
 
+  /// Recarga las notas de texto del caso desde [NotasCasoService].
   Future<void> _cargarNotas() async {
     final notas = await NotasCasoService.cargar(widget.caso.id);
     if (mounted) setState(() => _notas = notas);
   }
 
+  /// Abre el diálogo para crear una nueva nota de texto y la persiste.
   Future<void> _nuevaNota() async {
     final texto = await showDialog<String>(
       context: context,
@@ -88,6 +95,7 @@ class _ArchivosCasoScreenState extends State<ArchivosCasoScreen>
     }
   }
 
+  /// Elimina una nota de texto del caso y recarga la lista.
   Future<void> _eliminarNota(NotaCaso nota) async {
     await NotasCasoService.eliminar(widget.caso.id, nota.id);
     await _cargarNotas();

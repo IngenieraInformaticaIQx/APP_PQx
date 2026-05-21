@@ -18,6 +18,12 @@ import 'formulario_caso_screen.dart';
 import 'visor_caso_screen.dart';
 import 'package:untitled/services/app_theme.dart';
 
+/// Pantalla de gestión de planificaciones quirúrgicas guardadas localmente.
+///
+/// Lee las planificaciones de [PlanificacionLocal] almacenadas en disco y
+/// permite abrirlas en [VisorCasoScreen] con la configuración guardada
+/// (modelos visibles, opacidades, notas). En desktop usa un layout de dos
+/// columnas con sidebar de listado y panel de previsualización.
 class MisPlanificacionesLocalesScreen extends StatefulWidget {
   const MisPlanificacionesLocalesScreen({super.key});
 
@@ -63,6 +69,8 @@ class _MisPlanificacionesLocalesScreenState
     _cargar();
   }
 
+  /// Carga todas las planificaciones del disco y fusiona los estados
+  /// guardados en SharedPreferences para evitar race conditions.
   Future<void> _cargar() async {
     setState(() => _cargando = true);
     final lista = await PlanificacionRepository.cargarTodas();
@@ -108,6 +116,8 @@ class _MisPlanificacionesLocalesScreenState
   }
 
   // ── Abrir visor de una planificación ya guardada ──────────────────────────
+  /// Abre la planificación en el visor correspondiente según [PlanificacionLocal.tipoVisor]:
+  /// radiografía → [MedicionManualMilimetricaScreen], 3D → [VisorCasoScreen].
   Future<void> _abrirPlan(PlanificacionLocal plan) async {
     if (plan.tipoVisor == TipoVisor.radiografia) {
       // Flujo radiografia: medicion manual milimetrica, sin API externa.

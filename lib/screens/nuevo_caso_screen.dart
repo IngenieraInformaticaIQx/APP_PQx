@@ -15,6 +15,12 @@ import 'visor_selector_screen.dart';
 import 'captura_rx_screen.dart';
 import 'package:untitled/services/app_theme.dart';
 
+/// Pantalla de selección del método para crear un nuevo caso quirúrgico.
+///
+/// Presenta dos opciones:
+/// - "Desde radiografía": captura una RX con la cámara y la procesa con IA.
+/// - "Elegir visor 3D": accede directamente al catálogo de visores existentes.
+/// Las opciones con [_OpcionItem.disponible] = false se muestran bloqueadas.
 class NuevoCasoScreen extends StatefulWidget {
   const NuevoCasoScreen({super.key});
 
@@ -105,6 +111,8 @@ class _NuevoCasoScreenState extends State<NuevoCasoScreen>
     super.dispose();
   }
   bool _abriendo = false;
+  /// Navega a la pantalla correspondiente a [opcion].
+  /// Si [_OpcionItem.disponible] es false, muestra un snackbar informativo.
   Future<void> _navegar(_OpcionItem opcion) async {
     if (_abriendo) return;
     if (!opcion.disponible) {
@@ -212,6 +220,8 @@ class _NuevoCasoScreenState extends State<NuevoCasoScreen>
     );
   }
 
+  /// Construye la card hero de cada opción. Si está bloqueada añade un overlay
+  /// semitransparente con badge "Próximamente" y cambia la flecha por un candado.
   Widget _buildHeroCard(_OpcionItem opcion) {
     return GestureDetector(
       onTap: () => _navegar(opcion),
@@ -424,6 +434,7 @@ class _DotGridPainter extends CustomPainter {
   bool shouldRepaint(_DotGridPainter o) => o.color != color;
 }
 
+/// Modelo de datos para cada opción del menú de creación de caso.
 class _OpcionItem {
   final String id;
   final IconData icon;
@@ -433,6 +444,7 @@ class _OpcionItem {
   final Color accentColor;
   final Color accentColorLight;
   final String tag;
+  /// Si es false, la card aparece bloqueada con badge "Próximamente".
   final bool disponible;
   final String? imagenAsset;
   const _OpcionItem({

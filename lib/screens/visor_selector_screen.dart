@@ -8,6 +8,12 @@ import 'visor_caso_screen.dart';
 import 'varval_submenu_screen.dart';
 import 'package:untitled/services/app_theme.dart';
 
+/// Catálogo de visores 3D disponibles (Tobillo, Varval, Cadera, Columna…).
+///
+/// Cada [_VisorItem] con [disponible]=true abre [VisorCasoScreen] cargando
+/// los modelos del servidor para el caso correspondiente. Los items bloqueados
+/// muestran la card atenuada con badge "Próximamente".
+/// Si [desdeNuevoCaso] es true, viene del flujo de creación de caso.
 class VisorSelectorScreen extends StatefulWidget {
   final bool desdeNuevoCaso;
   const VisorSelectorScreen({super.key, this.desdeNuevoCaso = false});
@@ -150,6 +156,9 @@ class _VisorSelectorScreenState extends State<VisorSelectorScreen>
     super.dispose();
   }
 
+  /// Carga los casos del servidor y abre [VisorCasoScreen] con el caso
+  /// que coincide con [_VisorItem.casoNombre]. Si el visor no está disponible
+  /// muestra un snackbar y no navega.
   Future<void> _abrirVisor(_VisorItem visor) async {
     if (!visor.disponible) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -773,6 +782,7 @@ class _DotGridPainter extends CustomPainter {
 }
 
 // ── Modelo ─────────────────────────────────────────────────────────────────
+/// Modelo de datos para cada visor del catálogo.
 class _VisorItem {
   final String id;
   final String titulo;
@@ -781,6 +791,7 @@ class _VisorItem {
   final IconData icono;
   final Color accentColor;
   final Color accentColorLight;
+  /// Si es false, la card se muestra bloqueada con badge "Próximamente".
   final bool disponible;
   final String casoNombre;
   final String? imagenAsset;

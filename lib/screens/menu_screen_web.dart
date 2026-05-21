@@ -8,6 +8,8 @@ import 'package:untitled/screens/login_screen.dart';
 import 'package:untitled/services/app_theme.dart';
 import 'package:untitled/services/web_api.dart';
 
+/// Versión web del menú principal, con funcionalidades reducidas respecto a la app nativa.
+/// Las opciones que requieren cámara o GLBs muestran un placeholder informativo.
 class MenuScreen extends StatefulWidget {
   const MenuScreen({super.key});
 
@@ -57,12 +59,14 @@ class _MenuScreenWebState extends State<MenuScreen> {
     _loadUser();
   }
 
+  /// Carga el email del usuario guardado en SharedPreferences.
   Future<void> _loadUser() async {
     final prefs = await SharedPreferences.getInstance();
     if (mounted)
       setState(() => _userEmail = prefs.getString('login_email') ?? '');
   }
 
+  /// Borra credenciales de SharedPreferences y navega al login.
   Future<void> _logout() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('login_email');
@@ -75,6 +79,7 @@ class _MenuScreenWebState extends State<MenuScreen> {
     );
   }
 
+  /// Navega a la pantalla correspondiente o muestra el placeholder si no está disponible.
   void _open(_WebMenuItem item) {
     if (item.route == _WebRoute.cases) {
       Navigator.push(
