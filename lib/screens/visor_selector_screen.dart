@@ -64,7 +64,7 @@ class _VisorSelectorScreenState extends State<VisorSelectorScreen>
       icono: Icons.airline_seat_legroom_extra,
       accentColor: const Color(0xFF34A853),
       accentColorLight: const Color(0xFF81C995),
-      disponible: true,
+      disponible: false,
       casoNombre: 'Varval',
       imagenAsset: 'assets/images/caja.jpeg',
     ),

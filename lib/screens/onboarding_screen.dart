@@ -2,6 +2,7 @@ import 'dart:ui';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:untitled/services/app_theme.dart';
 import 'package:webview_flutter/webview_flutter.dart';
@@ -289,6 +290,15 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     if (!widget.fromPerfil) {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool('onboarding_visto', true);
+      try {
+        final res = await http
+            .head(Uri.parse('https://profesional.planificacionquirurgica.com/privacy.html'))
+            .timeout(const Duration(seconds: 6));
+        final version = res.headers['last-modified'] ?? '';
+        if (version.isNotEmpty) {
+          await prefs.setString('privacy_last_modified', version);
+        }
+      } catch (_) {}
       if (mounted) {
         Navigator.pushReplacement(
           context,
