@@ -47,7 +47,7 @@ class _NuevoCasoScreenState extends State<NuevoCasoScreen>
       accentColor: Color(0xFF8E44AD),
       accentColorLight: Color(0xFFCE93D8),
       tag: 'RADIOGRAFÍA + IA',
-      disponible: true,
+      disponible: false,
       imagenAsset: 'assets/images/tobillo.jpg',
     ),
     _OpcionItem(
@@ -107,6 +107,14 @@ class _NuevoCasoScreenState extends State<NuevoCasoScreen>
   bool _abriendo = false;
   Future<void> _navegar(_OpcionItem opcion) async {
     if (_abriendo) return;
+    if (!opcion.disponible) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('${opcion.titulo} estará disponible próximamente'),
+        backgroundColor: Colors.black87,
+        duration: const Duration(seconds: 2),
+      ));
+      return;
+    }
     if (opcion.id == 'radiografia') {
       Navigator.push(context, MaterialPageRoute(
         builder: (_) => const CapturaRxScreen(),
@@ -325,16 +333,54 @@ class _NuevoCasoScreenState extends State<NuevoCasoScreen>
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
                           gradient: LinearGradient(
-                            colors: [opcion.accentColor, opcion.accentColorLight],
+                            colors: opcion.disponible
+                                ? [opcion.accentColor, opcion.accentColorLight]
+                                : [Colors.grey.shade400, Colors.grey.shade500],
                             begin: Alignment.topLeft, end: Alignment.bottomRight),
                           boxShadow: [BoxShadow(
-                            color: opcion.accentColor.withOpacity(0.35),
+                            color: (opcion.disponible ? opcion.accentColor : Colors.grey).withOpacity(0.35),
                             blurRadius: 14, offset: const Offset(0, 5))]),
-                        child: const Icon(Icons.arrow_forward_rounded,
-                            color: Colors.white, size: 22)),
+                        child: Icon(
+                          opcion.disponible ? Icons.arrow_forward_rounded : Icons.lock_outline_rounded,
+                          color: Colors.white, size: 22)),
                     ]),
                   ]),
                 ),
+
+                // Overlay bloqueado
+                if (!opcion.disponible)
+                  Positioned.fill(
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(28),
+                      child: Container(
+                        color: AppTheme.isDark.value
+                            ? Colors.black.withOpacity(0.45)
+                            : Colors.white.withOpacity(0.50),
+                        child: Align(
+                          alignment: Alignment.topRight,
+                          child: Padding(
+                            padding: const EdgeInsets.all(14),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                              decoration: BoxDecoration(
+                                color: AppTheme.isDark.value
+                                    ? Colors.white.withOpacity(0.08)
+                                    : Colors.black.withOpacity(0.04),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: AppTheme.handleColor),
+                              ),
+                              child: Text('Próximamente',
+                                  style: TextStyle(
+                                      color: AppTheme.subtitleColor,
+                                      fontSize: 9,
+                                      fontWeight: FontWeight.w600,
+                                      letterSpacing: 0.5)),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
               ]),
             ),
           ),
