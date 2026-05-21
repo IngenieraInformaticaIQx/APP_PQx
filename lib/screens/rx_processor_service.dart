@@ -114,6 +114,7 @@ const Map<String, String> _glbUrls = {
 // RESULTADO
 // ---------------------------------------------------------------------------
 
+/// Resultado del procesado de radiografía: GLBs escalados + medidas + diagnóstico de calidad.
 class RxProcessorResult {
   final Map<String, Uint8List> glbBytes; // clave: 'tibia' | 'perone' | 'astragalo' | 'calcaneo'
   final Map<String, double> medidas;
@@ -148,6 +149,11 @@ class RxProcessorResult {
 // SERVICIO PRINCIPAL
 // ---------------------------------------------------------------------------
 
+/// Servicio de procesamiento local de radiografías.
+///
+/// Llama a Gemini Vision para medir huesos, descarga los GLB base desde el servidor,
+/// escala los vértices directamente en Dart y devuelve los bytes listos para el visor.
+/// No delega ninguna operación pesada al backend.
 class RxProcessorService {
   static bool _boolFlexible(dynamic v) {
     if (v is bool) return v;
@@ -173,9 +179,9 @@ class RxProcessorService {
     if (v is String) return double.tryParse(v.replaceAll(',', '.'));
     return null;
   }
-  // Punto de entrada principal.
-  // Nunca lanza excepción: si Gemini falla usa medidas anatómicas estándar
-  // y añade el motivo a RxProcessorResult.errores para que la UI lo muestre.
+  /// Punto de entrada principal del servicio.
+  /// Nunca lanza excepción: si Gemini falla usa medidas anatómicas estándar
+  /// y añade el motivo a [RxProcessorResult.errores] para que la UI lo muestre.
   static Future<RxProcessorResult> procesar({
     required Uint8List frontalImage,
     Uint8List? lateralImage,
@@ -334,6 +340,7 @@ class RxProcessorService {
     );
   }
 
+  /// Variante que bypasea Gemini y usa medidas manuales ya introducidas por el usuario.
   static Future<RxProcessorResult> procesarMedidasManual({
     required Map<String, double> medidas,
     required Map<String, dynamic> diagnosticoManual,
@@ -603,6 +610,7 @@ class RxProcessorService {
   // Segunda capa de defensa: aunque cada hueso esté en rango, sus relaciones
   // entre sí deben ser anatómicamente plausibles. Esto pilla casos donde
   // Gemini confunde unos huesos con otros o mide la rx de un implante distinto.
+  /// Peso estadístico de una clave de medida para el consenso entre pasadas Gemini.
   static double _pesoConsenso(String clave) {
     if (clave.startsWith('barra_calibracion') ||
         clave == 'diametro_bola_px' ||
@@ -614,12 +622,14 @@ class RxProcessorService {
     return 1.0;
   }
 
+  /// Normaliza el valor de confianza devuelto por Gemini a 'alta', 'media' o 'baja'.
   static String _normalizarConfianza(dynamic value) {
     final s = value?.toString().trim().toLowerCase();
     if (s == 'alta' || s == 'media' || s == 'baja') return s!;
     return 'media';
   }
 
+  /// Devuelve true si las medidas incluyen calibración con elemento físico real.
   static bool _tieneCalibracionFisica(Map<String, dynamic> medidas) {
     final metodo = medidas['metodo_calibracion']?.toString();
     return metodo == 'bolas' ||
@@ -627,6 +637,7 @@ class RxProcessorService {
         metodo == 'barra_diametro';
   }
 
+  /// Degrada la confianza si no hay calibración física en las medidas.
   static String _degradarPorAdvertencias(
     String confianza,
     Map<String, dynamic> medidas,
@@ -635,6 +646,7 @@ class RxProcessorService {
     return confianza == 'alta' ? 'media' : confianza;
   }
 
+  /// Ajusta la confianza según el método de calibración: estimación anatómica siempre ≤ media.
   static String _ajustarConfianzaPorCalibracion(
     String confianza,
     Map<String, dynamic> medidas,
@@ -652,6 +664,7 @@ class RxProcessorService {
     return confianza == 'media' ? 'media' : 'baja';
   }
 
+  /// Calcula un porcentaje de fiabilidad (0-100) combinando confianza, CV y errores.
   static int _calcularFiabilidadPct({
     required String confianza,
     required Map<String, dynamic> diagnostico,
@@ -892,11 +905,13 @@ Reglas estrictas:
     }
   }
 
+  /// Trunca texto largo a 220 caracteres para mensajes de error legibles.
   static String _resumenTexto(String text) {
     final limpio = text.replaceAll(RegExp(r'\s+'), ' ').trim();
     return limpio.length <= 220 ? limpio : '${limpio.substring(0, 220)}...';
   }
 
+  /// Convierte un error HTTP de Gemini en un mensaje legible para el usuario.
   static String _mensajeErrorGeminiHttp(int statusCode, String body) {
     try {
       final data = jsonDecode(body);
@@ -921,6 +936,7 @@ Reglas estrictas:
     return 'Gemini error $statusCode: ${_resumenTexto(body)}';
   }
 
+  /// Serializa un mapa de diagnóstico a JSON omitiendo el campo pesado 'content'.
   static String _resumenJson(Map<dynamic, dynamic> data) {
     final copy = Map<String, dynamic>.fromEntries(
       data.entries
@@ -939,6 +955,7 @@ Reglas estrictas:
   // sube el número y los entries antiguos se ignoran.
 static const int _cacheVersion = 5;
 
+  /// Genera una clave de caché única para el par de imágenes frontal/lateral.
   static String _imageCacheKey(Uint8List frontal, Uint8List? lateral) {
     int h = _cacheVersion * 0x01000193;
     h = _hashBytes(frontal, h);
@@ -948,6 +965,7 @@ static const int _cacheVersion = 5;
 
   // FNV-1a sobre una muestra (no todos los bytes — para imágenes grandes
   // bastan algunas regiones representativas).
+  /// Hash FNV-1a sobre una muestra representativa del array (cabeza + cola).
   static int _hashBytes(Uint8List data, int seed) {
     int h = seed;
     final n = data.length;
@@ -967,6 +985,7 @@ static const int _cacheVersion = 5;
     return h;
   }
 
+  /// Un paso del algoritmo FNV-1a de 32 bits.
   static int _fnv1a(int h, int b) {
     h = (h ^ b) & 0xFFFFFFFF;
     h = (h * 0x01000193) & 0xFFFFFFFF;
@@ -985,6 +1004,7 @@ static const int _cacheVersion = 5;
     return null;
   }
 
+  /// Persiste la respuesta de Gemini en caché temporal para evitar repetir llamadas.
   static Future<void> _escribirCacheGemini(
       String key, Map<String, dynamic> raw) async {
     try {
@@ -1010,6 +1030,7 @@ static const int _cacheVersion = 5;
     return borrados;
   }
 
+  /// Extrae un JSON del texto de respuesta de Gemini, tolerando markdown y ruido.
   static Map<String, dynamic> _extraerJson(String texto) {
     // Intentar parseo directo
     try {
@@ -1091,6 +1112,7 @@ static const int _cacheVersion = 5;
   // FASE 3 — Cache de GLBs base
   // -------------------------------------------------------------------------
 
+  /// Descarga el GLB base de un hueso desde el servidor o lo sirve desde caché local.
   static Future<Uint8List> _obtenerGlbBase(String nombre) async {
     // Intentar desde cache local primero
     try {
@@ -1122,6 +1144,7 @@ static const int _cacheVersion = 5;
     return bytes;
   }
 
+  /// Valida que todas las medidas clave estén presentes y dentro del rango anatómico.
   static void _validarMedidasEstrictas(Map<String, dynamic> medidas) {
     const keys = <String>[
       'tibia_longitud_mm',
@@ -1212,6 +1235,7 @@ static const int _cacheVersion = 5;
     );
   }
 
+  /// Calcula la mediana de una lista de valores numéricos.
   static double _medianaNumerica(List<double> values) {
     final sorted = List<double>.from(values)..sort();
     final mid = sorted.length ~/ 2;
@@ -1220,6 +1244,7 @@ static const int _cacheVersion = 5;
         : (sorted[mid - 1] + sorted[mid]) / 2.0;
   }
 
+  /// Calcula el coeficiente de variación (desviación/media) como indicador de dispersión.
   static double _coefVariacion(List<double> values) {
     if (values.isEmpty) return 1.0;
     final mean = values.reduce((a, b) => a + b) / values.length;
@@ -1230,6 +1255,7 @@ static const int _cacheVersion = 5;
     return math.sqrt(variance) / mean;
   }
 
+  /// Estima la escala mm/px usando proporciones anatómicas conocidas como fallback.
   static Map<String, dynamic>? _resolverEscalaAnatomica(
       Map<String, dynamic> raw) {
     final estimaciones = <double>[];

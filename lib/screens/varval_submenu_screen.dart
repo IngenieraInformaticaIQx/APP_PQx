@@ -11,6 +11,10 @@ import 'package:untitled/services/app_theme.dart';
 // ══════════════════════════════════════════════════════════════════════════════
 // NIVEL 1 — Adición / Sustracción / Rotación
 // ══════════════════════════════════════════════════════════════════════════════
+/// Submenú de selección de sistema Varval (Primario / Revisión).
+///
+/// Cada opción navega a [VarvalZonaScreen] donde el médico elige la zona
+/// anatómica específica antes de abrir [VisorCasoScreen].
 class VarvalSubmenuScreen extends StatefulWidget {
   const VarvalSubmenuScreen({super.key});
 
@@ -458,6 +462,8 @@ class _VarvalSubmenuScreenState extends State<VarvalSubmenuScreen>
 // ══════════════════════════════════════════════════════════════════════════════
 // NIVEL 2 — Tibial / Femoral
 // ══════════════════════════════════════════════════════════════════════════════
+/// Segunda pantalla del flujo Varval: selección de zona anatómica
+/// (Tibial / Femoral) para la opción elegida en [VarvalSubmenuScreen].
 class VarvalZonaScreen extends StatefulWidget {
   final _VarvalOpcion opcion;
   const VarvalZonaScreen({super.key, required this.opcion});
@@ -561,6 +567,8 @@ class _VarvalZonaScreenState extends State<VarvalZonaScreen>
 
   // 👇 SOLO PEGA ESTE MÉTODO DENTRO DE TU CLASE VarvalZonaScreen
 
+  /// Carga los casos del servidor y abre [VisorCasoScreen] con el caso
+  /// correspondiente a la zona Varval seleccionada.
   Future<void> _abrirVisor(_VarvalZona zona) async {
     setState(() => _cargandoVisor = true);
 

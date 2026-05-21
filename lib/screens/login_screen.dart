@@ -11,6 +11,12 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:untitled/services/app_theme.dart';
 import 'package:untitled/services/web_api.dart';
 
+/// Pantalla de autenticación de la app.
+///
+/// Mobile/Desktop: GET a [WebApi.loginUri] con cabecera Basic Auth.
+/// Web: POST a [WebApi.loginUri] (proxy CORS).
+/// Si "Recuérdame" está activo y las credenciales son válidas,
+/// se omite esta pantalla y se redirige directamente al menú.
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
 
@@ -74,6 +80,8 @@ class _LoginScreenState extends State<LoginScreen>
     _loadSavedCredentials();
   }
 
+  /// Comprueba si hay credenciales guardadas con "Recuérdame".
+  /// Si las hay, hace auto-login sin mostrar el formulario.
   Future<void> _loadSavedCredentials() async {
     final prefs = await SharedPreferences.getInstance();
     final remember = prefs.getBool('remember_me') ?? false;
@@ -118,6 +126,8 @@ class _LoginScreenState extends State<LoginScreen>
     super.dispose();
   }
 
+  /// Extrae el nombre de grupo del email (parte antes del @).
+  /// Usado como identificador de grupo para los tokens FCM.
   String _normalizarGrupo(String usuario) {
     final clean = usuario.trim();
     if (clean.contains('@')) {
@@ -126,6 +136,8 @@ class _LoginScreenState extends State<LoginScreen>
     return clean;
   }
 
+  /// Envía el token FCM actual al servidor para habilitar notificaciones push.
+  /// No hace nada en web ya que FCM no está disponible en esa plataforma.
   Future<void> _guardarTokenEnServidor(String grupo) async {
     try {
       if (kIsWeb) return;
@@ -141,6 +153,8 @@ class _LoginScreenState extends State<LoginScreen>
     } catch (_) {}
   }
 
+  /// Valida las credenciales contra el servidor y, si son correctas,
+  /// guarda la sesión y navega a [OnboardingScreen] o [MenuScreen].
   void _login() async {
     setState(() {
       _isLoading = true;

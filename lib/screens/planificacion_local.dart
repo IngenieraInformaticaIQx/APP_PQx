@@ -9,6 +9,7 @@ enum EstadoIA { ninguno, pendiente, procesando, listo, error }
 
 // ── Zonas ─────────────────────────────────────────────────────────────────────
 
+/// Zona anatómica objetivo del implante (tobillo, rodilla, cadera...).
 class ZonaImplante {
   final String id;
   final String nombre;
@@ -35,6 +36,8 @@ const List<ZonaImplante> kZonasImplante = [
 
 // ── Modelo ────────────────────────────────────────────────────────────────────
 
+/// Planificación quirúrgica guardada localmente en el dispositivo.
+/// Contiene los datos del paciente, las rutas de las radiografías y el estado del análisis IA.
 class PlanificacionLocal {
   final String id;
   final String nombrePaciente;
@@ -156,9 +159,11 @@ class PlanificacionLocal {
 
 // ── Repository ────────────────────────────────────────────────────────────────
 
+/// Repositorio de planificaciones locales: persiste en SharedPreferences como lista JSON.
 class PlanificacionRepository {
   static const _key = 'planificaciones_locales';
 
+  /// Carga todas las planificaciones ordenadas por fecha de creación descendente.
   static Future<List<PlanificacionLocal>> cargarTodas() async {
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getStringList(_key) ?? [];
@@ -178,6 +183,7 @@ class PlanificacionRepository {
       ..sort((a, b) => b.fechaCreacion.compareTo(a.fechaCreacion));
   }
 
+  /// Guarda o actualiza una planificación (inserta al inicio si es nueva).
   static Future<void> guardar(PlanificacionLocal plan) async {
     final prefs = await SharedPreferences.getInstance();
     final lista = await cargarTodas();
@@ -196,6 +202,7 @@ class PlanificacionRepository {
     );
   }
 
+  /// Elimina la planificación con el [id] indicado.
   static Future<void> eliminar(String id) async {
     final prefs = await SharedPreferences.getInstance();
     final lista = await cargarTodas();

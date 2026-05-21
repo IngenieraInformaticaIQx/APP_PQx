@@ -3,6 +3,8 @@ import 'dart:io';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+/// Modelo de datos para una nota de audio vinculada a un caso quirúrgico.
+/// Se serializa a JSON y se persiste en SharedPreferences.
 class AudioNota {
   final String id;
   final String casoId;
@@ -35,9 +37,15 @@ class AudioNota {
   );
 }
 
+/// Servicio estático para gestionar notas de audio por caso.
+///
+/// Los metadatos se persisten en SharedPreferences bajo la clave
+/// `audio_notas_{casoId}`. Los archivos de audio (.m4a) se almacenan
+/// en el directorio de documentos de la app via [path_provider].
 class AudioNotasService {
   static const _prefsKey = 'audio_notas';
 
+  /// Devuelve la ruta al directorio de audio, creándolo si no existe.
   static Future<String> _dirPath() async {
     final dir = await getApplicationDocumentsDirectory();
     final audioDir = Directory('${dir.path}/audio_notas');
@@ -45,11 +53,13 @@ class AudioNotasService {
     return audioDir.path;
   }
 
+  /// Genera la ruta completa para un nuevo archivo de audio de un caso.
   static Future<String> nuevaRuta(String casoId, String id) async {
     final dir = await _dirPath();
     return '$dir/${casoId}_$id.m4a';
   }
 
+  /// Carga todas las notas de audio de un caso, ordenadas por fecha descendente.
   static Future<List<AudioNota>> cargar(String casoId) async {
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString('${_prefsKey}_$casoId') ?? '[]';
@@ -58,6 +68,7 @@ class AudioNotasService {
       ..sort((a, b) => b.fecha.compareTo(a.fecha));
   }
 
+  /// Inserta una nueva nota al principio de la lista y persiste en SharedPreferences.
   static Future<void> guardar(AudioNota nota) async {
     final prefs = await SharedPreferences.getInstance();
     final notas = await cargar(nota.casoId);
@@ -68,6 +79,7 @@ class AudioNotasService {
     );
   }
 
+  /// Elimina la nota de SharedPreferences y borra el archivo de audio del disco.
   static Future<void> eliminar(AudioNota nota) async {
     final prefs = await SharedPreferences.getInstance();
     final notas = await cargar(nota.casoId);
@@ -80,6 +92,7 @@ class AudioNotasService {
     if (file.existsSync()) file.deleteSync();
   }
 
+  /// Elimina todas las notas y archivos de audio de un caso completo.
   static Future<void> eliminarSesion(String casoId) async {
     final prefs = await SharedPreferences.getInstance();
     final notas = await cargar(casoId);

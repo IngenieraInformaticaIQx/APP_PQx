@@ -7,6 +7,11 @@ import 'package:uuid/uuid.dart';
 import 'package:untitled/services/audio_notas_service.dart';
 import 'package:untitled/services/app_theme.dart';
 
+/// Panel lateral de notas de audio para el visor 3D.
+///
+/// Permite grabar, reproducir y eliminar notas de voz asociadas a un caso.
+/// Usa el package [record] para grabar y [audioplayers] para reproducir.
+/// Los archivos se persisten via [AudioNotasService].
 class AudioNotasPanel extends StatefulWidget {
   final String casoId;
   const AudioNotasPanel({super.key, required this.casoId});
@@ -43,11 +48,14 @@ class _AudioNotasPanelState extends State<AudioNotasPanel> {
     super.dispose();
   }
 
+  /// Recarga la lista de notas de audio del caso desde [AudioNotasService].
   Future<void> _cargar() async {
     final notas = await AudioNotasService.cargar(widget.casoId);
     if (mounted) setState(() => _notas = notas);
   }
 
+  /// Solicita permiso de micrófono e inicia la grabación en formato AAC.
+  /// Arranca un timer que actualiza el contador de segundos grabados.
   Future<void> _iniciarGrabacion() async {
     final hasPermission = await _recorder.hasPermission();
     if (!hasPermission) {
@@ -67,6 +75,7 @@ class _AudioNotasPanelState extends State<AudioNotasPanel> {
     });
   }
 
+  /// Detiene la grabación, crea un [AudioNota] y lo persiste.
   Future<void> _pararGrabacion() async {
     _timerGrabacion?.cancel();
     final ruta = await _recorder.stop();
@@ -87,6 +96,7 @@ class _AudioNotasPanelState extends State<AudioNotasPanel> {
     await _cargar();
   }
 
+  /// Alterna reproducción/parada de una nota. Si hay otra reproduciéndose la detiene primero.
   Future<void> _togglePlay(AudioNota nota) async {
     if (_reproduciendo == nota.id) {
       await _player.stop();
@@ -105,6 +115,7 @@ class _AudioNotasPanelState extends State<AudioNotasPanel> {
     }
   }
 
+  /// Para la reproducción si estaba activa, elimina la nota y el archivo de audio.
   Future<void> _eliminar(AudioNota nota) async {
     if (_reproduciendo == nota.id) {
       await _player.stop();

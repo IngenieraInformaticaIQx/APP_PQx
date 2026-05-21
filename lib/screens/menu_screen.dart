@@ -34,6 +34,12 @@ bool get _esPlataformaEscritorio {
   }
 }
 
+/// Menú principal de la app para mobile y desktop.
+///
+/// Muestra las tarjetas de acceso a cada módulo (Catálogo 3D, Mis Casos, etc.),
+/// el último caso accedido, un slider de frases médicas y el perfil del usuario.
+/// En escritorio (Windows/macOS/Linux/Web) usa un layout de dos columnas con
+/// panel lateral de navegación; en mobile usa tarjetas verticales.
 class MenuScreen extends StatefulWidget {
   const MenuScreen({super.key});
 
@@ -229,6 +235,7 @@ class _MenuScreenState extends State<MenuScreen>
     });
   }
 
+  /// Avanza automáticamente el slider de frases cada 5 segundos.
   void _startFraseTimer() {
     _fraseTimer = Timer.periodic(const Duration(seconds: 5), (_) {
       if (!mounted || !_fraseController.hasClients) return;
@@ -493,6 +500,7 @@ class _MenuScreenState extends State<MenuScreen>
     }
   }
 
+  /// Borra las credenciales de SharedPreferences y vuelve a [LoginScreen].
   void _cerrarSesion() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('remember_me', false);
@@ -502,6 +510,8 @@ class _MenuScreenState extends State<MenuScreen>
         MaterialPageRoute(builder: (_) => const LoginScreen()));
   }
 
+  /// Muestra el bottom sheet del perfil de usuario con opciones de tema,
+  /// política de privacidad y cierre de sesión.
   void _mostrarPerfil() {
     showModalBottomSheet(
       context: context,
@@ -663,6 +673,7 @@ class _MenuScreenState extends State<MenuScreen>
     );
   }
 /////////////////////////////////////////////ONTAP////////////////////////
+  /// Navega a la pantalla correspondiente al índice de la tarjeta pulsada.
   void _onTap(int index) {
     switch (index) {
       case 0:
@@ -1145,6 +1156,8 @@ class _MenuScreenState extends State<MenuScreen>
     );
   }
 
+  /// Construye la tarjeta glass animada de cada módulo del menú (mobile).
+  /// Si [_MenuItem.disponible] es false, muestra overlay bloqueado con badge.
   Widget _buildCard(_MenuItem item, int index, Size size) {
     return GestureDetector(
       onTap: () => _onTap(index),
@@ -1397,6 +1410,8 @@ class _MenuScreenState extends State<MenuScreen>
   }
 
   // ── Acceso rápido ──────────────────────────────────────────────────────────
+  /// Widget de acceso rápido al último caso abierto.
+  /// Muestra el nombre, estado y permite abrir directamente el [VisorCasoScreen].
   Widget _buildAccesoRapido() {
     final color = _estadoColor(_ultimoCasoEstado ?? '');
     final colorL = _estadoColorLight(_ultimoCasoEstado ?? '');
@@ -1488,6 +1503,7 @@ class _MenuScreenState extends State<MenuScreen>
   }
 
   // ── Slider de frases médicas ──────────────────────────────────────────
+  /// Slider horizontal con frases médicas inspiracionales en orden aleatorio.
   Widget _buildSliderFrases() {
     return Column(children: [
       SizedBox(

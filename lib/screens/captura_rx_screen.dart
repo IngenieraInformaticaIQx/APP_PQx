@@ -16,6 +16,11 @@ import 'formulario_caso_screen.dart';
 import 'planificacion_local.dart';
 import 'package:untitled/services/app_theme.dart';
 
+/// Pantalla de captura de radiografías (frontal + lateral) previa al procesado con IA.
+///
+/// Permite tomar fotos con la cámara o seleccionarlas desde la galería.
+/// Las imágenes se reescalan a un máximo de [_maxImageDimension] px antes de
+/// pasarlas a [FormularioCasoScreen] → procesado con Gemini.
 class CapturaRxScreen extends StatefulWidget {
   const CapturaRxScreen({super.key});
 
@@ -72,6 +77,8 @@ class _CapturaRxScreenState extends State<CapturaRxScreen>
   }
 
   // ── Captura ────────────────────────────────────────────────────────────────
+  /// Abre la cámara o galería según [source] y guarda la imagen capturada.
+  /// [esFrontal] indica si es la proyección frontal (true) o lateral (false).
   Future<void> _capturar(bool esFrontal, ImageSource source) async {
     if (_abriendoCamara) return;
     setState(() => _abriendoCamara = true);
@@ -130,6 +137,7 @@ class _CapturaRxScreenState extends State<CapturaRxScreen>
     }
   }
 
+  /// Descarta la imagen frontal o lateral seleccionada.
   void _eliminar(bool esFrontal) {
     HapticFeedback.selectionClick();
     setState(() {
@@ -141,6 +149,7 @@ class _CapturaRxScreenState extends State<CapturaRxScreen>
     });
   }
 
+  /// Muestra el bottom sheet para elegir entre cámara y galería.
   Future<void> _elegirFuente(bool esFrontal) async {
     if (_abriendoCamara) return;
     final source = await showModalBottomSheet<ImageSource>(
@@ -152,6 +161,7 @@ class _CapturaRxScreenState extends State<CapturaRxScreen>
     await _capturar(esFrontal, source);
   }
 
+  /// Valida que la RX frontal exista y navega a [FormularioCasoScreen] con las rutas.
   Future<void> _continuar() async {
     if (_fotoFrontalPath == null || _continuando) return;
     if (!await File(_fotoFrontalPath!).exists()) {

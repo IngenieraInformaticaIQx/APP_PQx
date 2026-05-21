@@ -7,6 +7,10 @@ import 'package:flutter/services.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:untitled/services/app_theme.dart';
 
+/// Widget de menú contextual del visor 3D mostrado como overlay flotante.
+///
+/// Contiene un hero animado con scanner HUD y un WebView opcional para
+/// renderizar controles avanzados. Se usa dentro de [VisorCasoScreen].
 class MenuVisor3D extends StatefulWidget {
   const MenuVisor3D({super.key});
 
@@ -37,6 +41,8 @@ class _MenuVisor3DState extends State<MenuVisor3D>
     if (!_isWindows) _initWebView();
   }
 
+  /// Carga los modelos GLB de assets/RX/ en base64 y los inyecta en el WebView
+  /// para renderizar el visor de referencia anatómica sin peticiones de red.
   Future<void> _initWebView() async {
     try {
       final glbs = <String, String>{};

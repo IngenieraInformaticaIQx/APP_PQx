@@ -9,6 +9,10 @@ import 'visor_caso_screen.dart';
 import 'package:untitled/services/app_theme.dart';
 import 'package:untitled/services/audio_notas_service.dart';
 
+/// Listado de sesiones de planificación exportadas/guardadas en el servidor.
+///
+/// Carga las sesiones desde SharedPreferences (`listados_sesiones`) y
+/// permite ver el detalle de cada una en [_DetalleScreen] o eliminarlas.
 class ListadosScreen extends StatefulWidget {
   const ListadosScreen({super.key});
 
@@ -67,6 +71,7 @@ class _ListadosScreenState extends State<ListadosScreen>
     super.dispose();
   }
 
+  /// Lee las sesiones guardadas de SharedPreferences y lanza animaciones de entrada.
   Future<void> _cargarSesiones() async {
     setState(() => _loading = true);
     for (final c in _cardControllers) c.dispose();

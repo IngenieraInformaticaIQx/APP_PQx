@@ -25,6 +25,8 @@ import 'visor_pdf_screen.dart';
 
 // ── Modelos de datos ──────────────────────────────────────────────────────
 
+/// Representa un archivo GLB/GLTF con su URL en el servidor.
+/// [tipo] puede ser 'biomodelo', 'placa', 'tornillo' o 'carpeta'.
 class GlbArchivo {
   final String nombre;
   final String archivo;
@@ -46,6 +48,7 @@ class GlbArchivo {
       );
 }
 
+/// Agrupa varias placas GLB bajo un mismo nombre de familia (p.ej. "DHS", "Gamma").
 class GrupoPlagas {
   final String nombre;
   final List<GlbArchivo> placas;
@@ -58,6 +61,7 @@ class GrupoPlagas {
       );
 }
 
+/// Agrupa varios tornillos GLB bajo un mismo nombre de familia (p.ej. "Corticales 3.5").
 class GrupoTornillos {
   final String nombre;
   final List<GlbArchivo> tornillos;
@@ -72,6 +76,8 @@ class GrupoTornillos {
 
 // ── Carpetas dinámicas (reemplaza pre/post hardcodeados) ──────────────────
 
+/// Subgrupo de archivos GLB dentro de una [CarpetaGlb].
+/// [nombre] vacío indica que los archivos pertenecen directamente a la raíz de la carpeta.
 class SubgrupoGlb {
   final String nombre;   // "" = raíz de la carpeta
   final List<GlbArchivo> archivos;
@@ -88,6 +94,8 @@ class SubgrupoGlb {
   };
 }
 
+/// Carpeta dinámica de archivos GLB, p.ej. "pre-op" o "post-op".
+/// Reemplaza las listas pre/post hardcodeadas del formato antiguo.
 class CarpetaGlb {
   final String nombre;
   final List<SubgrupoGlb> grupos;
@@ -108,6 +116,8 @@ class CarpetaGlb {
   };
 }
 
+/// Modelo completo de un caso quirúrgico: datos del paciente + todos los GLB asociados.
+/// Soporta el formato nuevo (carpetas dinámicas) y el legado (pre/post planos).
 class CasoMedico {
   final String id;
   final String nombre;
@@ -227,12 +237,14 @@ class CasoMedico {
   };
 }
 
+/// Paleta de colores semánticos para el visor 3D.
 class _C {
   static const accentBone    = Color(0xFF2196F3);
   static const accentImplant = Color(0xFF4CAF50);
   static const accentScrew   = Color(0xFFFF9800);
 }
 
+/// Medición de distancia creada con la herramienta de regla libre del visor 3D.
 class Medicion3D {
   final String id;
   double mm;
@@ -247,6 +259,7 @@ class Medicion3D {
   });
 }
 
+/// Anotación de texto anclada a una posición 3D en el espacio mundo del visor.
 class Nota3D {
   final String id;
   final String texto;
@@ -257,6 +270,7 @@ class Nota3D {
           this.visible = true});
 }
 
+/// Desplazamiento y rotación de una placa en el espacio 3D, reportado por JS al arrastrarla.
 class _DesplazamientoPlaca {
   final double dx, dy, dz; // desplazamiento en espacio mundo (mm)
   final double dist;        // distancia total
@@ -273,6 +287,8 @@ class _DesplazamientoPlaca {
   bool get tieneDesplazamiento => dist > 0.05 || rotTotal > 0.05;
 }
 
+/// Representa un tornillo que el usuario ha colocado en la escena 3D.
+/// Mantiene la referencia a la instancia JS y los datos de posición/orientación del hole.
 class TornilloColocado {
   final String instanceId;
   final String glbId;
@@ -304,7 +320,7 @@ class TornilloColocado {
   });
 }
 
-// Datos del tap recibidos del JS
+/// Datos de un tap en la superficie 3D enviados desde JS via canal VisorTap.
 class _TapData {
   final double x, y, z;
   final double nx, ny, nz;
@@ -336,6 +352,11 @@ class _TapData {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+/// Pantalla principal del visor 3D quirúrgico.
+///
+/// Renderiza modelos GLB del caso médico en un WebView con three.js (mobile/web)
+/// o en un widget nativo Windows. Permite posicionar implantes, medir distancias,
+/// anotar la escena, capturar vistas y exportar la planificación.
 class VisorCasoScreen extends StatefulWidget {
   final CasoMedico caso;
   /// Si true, carga y muestra todas las capas automáticamente al abrirse.
@@ -488,6 +509,7 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
   double _planoPos       = 0.5;  // 0..1 normalizado
   final Set<int> _planoCapas = {}; // índices GLB con plano activo
 
+  /// Reacciona a cambios de tema claro/oscuro actualizando el fondo del visor JS.
   void _onThemeChanged() {
     if (!mounted) return;
     setState(() {});
@@ -496,6 +518,8 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
     }
   }
 
+  /// Parsea el JSON enviado por JS cuando el usuario arrastra una placa y actualiza
+  /// el overlay con las medidas de desplazamiento/rotación en tiempo real.
   void _actualizarEstadoPlacaArrastrando(String raw, {bool haptics = false}) {
     if (!mounted) return;
     try {
@@ -811,6 +835,8 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
     _credencialesFuture = _cargarCredenciales();
   }
 
+  /// Callback invocado cuando el visor Windows nativo señala que está listo.
+  /// Inyecta variables globales JS y decide si restaurar sesión o auto-cargar.
   void _onVisorReadyWindows() {
     if (!mounted) return;
     setState(() => _visorListo = true);
@@ -874,6 +900,7 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
     }
   }
 
+  /// Lee email y contraseña guardados y genera el token Basic Auth en base64.
   Future<void> _cargarCredenciales() async {
     final prefs = await SharedPreferences.getInstance();
     final email = prefs.getString('login_email') ?? '';
@@ -901,6 +928,7 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
     super.dispose();
   }
 
+  /// Persiste en SharedPreferences las capas visibles y el estado 3D al salir del visor.
   void _guardarVisiblesAlSalir() {
     final indices = _visibles.entries
         .where((e) => e.value == true)
@@ -1089,11 +1117,13 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
     return result;
   }
 
+  /// Extrae solo el nombre legible de un tornillo, descartando el código numérico.
   String _nombreCorto(String nombre) {
     final p = _parsearTornillo(nombre);
     return p['nombre'] as String;
   }
 
+  /// Devuelve la etiqueta "Ø3.5 · 28 mm" extraída del nombre codificado del tornillo.
   String _labelDiamLargo(String nombre) {
     final p = _parsearTornillo(nombre);
     final diam = p['diametro'] as double;
@@ -1102,6 +1132,7 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
     return '';
   }
 
+  /// Extrae el largo en mm desde el nombre del tornillo usando caché de parseo.
   double _largoDesdeNombre(String nombre) {
     final p = _parsearTornillo(nombre);
     if ((p['largo'] as double) > 0) return p['largo'] as double;
@@ -1189,6 +1220,7 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
     _jsRun("window.visor.insertarTornillo('$escaped');");
   }
 
+  /// Muestra u oculta un tornillo ya colocado. Si no está en la escena JS lo coloca primero.
   void _toggleVisibilidadTornillo(TornilloColocado tc) {
     final mostrar = !tc.visible;
     tc.visible = mostrar;
@@ -1251,12 +1283,14 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
     _jsRun("window.visor.insertarTornillo('${payload.replaceAll("'", "\\'")}');");
   }
 
+  /// Alterna la visibilidad de la regla de profundidad de un tornillo en la escena.
   void _toggleRegla(TornilloColocado tc) {
     tc.reglaVisible = !tc.reglaVisible;
     _jsRun("window.visor.toggleRegla('${tc.instanceId}',${tc.reglaVisible});");
     _colocadosVersion.value++;
   }
 
+  /// Elimina un tornillo de la escena JS y de la lista local de colocados.
   void _eliminarTornillo(TornilloColocado tc) {
     _jsRun("window.visor.eliminarRegla('${tc.instanceId}');");
     _jsRun("window.visor.eliminarTornillo('${tc.instanceId}');");
@@ -1265,11 +1299,13 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
     _colocadosVersion.value++;
   }
 
+  /// Deshace la última acción de colocación de tornillo.
   void _deshacerUltimo() {
     if (_tornillosColocados.isEmpty) return;
     _eliminarTornillo(_tornillosColocados.last);
   }
 
+  /// Ejecuta JavaScript en el visor activo (WebView en mobile/web, widget nativo en Windows).
   void _jsRun(String js) {
     if (Platform.isWindows) {
       _visorWindowsKey.currentState?.runJs(js);
@@ -1318,6 +1354,7 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
   void _jsToggleReglaLibre(String id, bool v) => _jsRun("window.visor.toggleReglaLibre('$id',$v);");
   void _jsEliminarReglaLibre(String id) => _jsRun("window.visor.eliminarReglaLibre('$id');");
 
+  /// Abre el diálogo para introducir el texto de una nueva nota 3D anclada en (x,y,z).
   void _mostrarDialogoNota(double x, double y, double z) {
     setState(() => _modoNota = false);
     _jsNotaModo(false);
@@ -1421,6 +1458,7 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
   void _jsPlanoGlb(int idx, bool activo) =>
       _jsRun("window.visor.setPlanoGlb('glb_$idx',$activo);");
 
+  /// Alterna la visibilidad de una capa GLB. Si se activa, descarga y carga el modelo en JS.
   void _toggleVisibilidad(int idx) {
     final nuevo = !(_visibles[idx] ?? true);
     setState(() => _visibles[idx] = nuevo);
@@ -1808,6 +1846,7 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
     } catch (_) {}
   }
 
+  /// Activa o desactiva simultáneamente todas las capas GLB del caso.
   void _toggleTodos() {
     final nuevo = !_todosVisibles;
     setState(() { for (final k in _visibles.keys) _visibles[k] = nuevo; });
@@ -1828,6 +1867,7 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
     return List.generate(n, (i) => i).every((i) => _visibles[i] == true);
   }
 
+  /// Devuelve true si todos los archivos de la carpeta [ci] están visibles.
   bool _carpetaTodosVisibles(int ci) {
     final start = widget.caso.carpetaStartIdx(ci);
     final n = widget.caso.carpetas[ci].todosArchivos.length;
@@ -1835,6 +1875,7 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
     return List.generate(n, (i) => start + i).every((i) => _visibles[i] == true);
   }
 
+  /// Activa o desactiva simultáneamente todos los biomodelos (huesos) del caso.
   void _toggleBiomodelos() {
     final nuevo = !_bioTodosVisibles;
     final n = widget.caso.biomodelos.length;
@@ -1852,6 +1893,7 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
     }
   }
 
+  /// Normaliza una etiqueta GLB a minúsculas sin acentos ni caracteres especiales.
   String _normalizarEtiquetaGlb(String valor) {
     return valor
         .toLowerCase()
@@ -1865,12 +1907,14 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
         .trim();
   }
 
+  /// Devuelve true si el texto normalizado contiene alguno de los términos dados.
   bool _textoContieneAlguno(String texto, List<String> terminos) {
     final normalizado = _normalizarEtiquetaGlb(texto);
     if (normalizado.isEmpty) return false;
     return terminos.any((t) => normalizado.contains(t));
   }
 
+  /// Detecta si el nombre de un GLB corresponde a un implante (placa, tornillo, guía...).
   bool _esEtiquetaImplante(String texto) {
     return _textoContieneAlguno(texto, const [
       'placa',
@@ -1890,6 +1934,7 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
     ]);
   }
 
+  /// Detecta si el nombre de un GLB corresponde a tejido óseo (biomodelo, tibia, fémur...).
   bool _esEtiquetaHueso(String texto) {
     return _textoContieneAlguno(texto, const [
       'biomodelo',
@@ -1981,6 +2026,7 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
     return ordenados.toString(); // [0,1,2,...] válido como array JS
   }
 
+  /// Activa o desactiva todos los archivos de la carpeta [ci].
   void _toggleCarpeta(int ci) {
     final nuevo = !_carpetaTodosVisibles(ci);
     final start = widget.caso.carpetaStartIdx(ci);
@@ -1999,12 +2045,14 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
     }
   }
 
+  /// Devuelve true si todos los archivos del subgrupo [gi] dentro de la carpeta [ci] están visibles.
   bool _subgrupoTodosVisibles(int ci, int gi, int startIdx) {
     final n = widget.caso.carpetas[ci].grupos[gi].archivos.length;
     if (n == 0) return false;
     return List.generate(n, (i) => startIdx + i).every((i) => _visibles[i] == true);
   }
 
+  /// Activa o desactiva todos los archivos del subgrupo [gi] dentro de la carpeta [ci].
   void _toggleSubgrupo(int ci, int gi, int startIdx) {
     final nuevo = !_subgrupoTodosVisibles(ci, gi, startIdx);
     final n = widget.caso.carpetas[ci].grupos[gi].archivos.length;
@@ -5258,6 +5306,8 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
     return html.replaceFirst('</head>', darkCss).replaceFirst('<body>', '<body class="dark">');
   }
 
+  /// Genera el HTML del visor adaptado para WebView2 en Windows, inyectando un
+  /// adaptador de canales que traduce `.postMessage` a `chrome.webview.postMessage`.
   String _buildHtmlWindows() {
     final html = _patchHtmlTheme(_buildHtml());
     // Inyectar adaptador de canales justo antes de </head>
@@ -5716,7 +5766,7 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
     );
   }
 
-  // ── Etiqueta info tornillo (tap sobre tornillo colocado) ──────────────────
+  /// Panel inferior para capturar y guardar una vista personalizada con comentario.
   Widget _buildPanelVistaPersonalizada(BuildContext context) {
     final n = _vistasPersonalizadas.length + 1;
     return Positioned(
@@ -5808,6 +5858,7 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
     );
   }
 
+  /// Tooltip flotante que muestra nombre, diámetro y largo del tornillo tapeado.
   Widget _buildScrewInfoLabel(BuildContext context) {
     final tc = _screwInfoTc!;
     final screen = MediaQuery.of(context).size;
@@ -5881,7 +5932,7 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
     );
   }
 
-  // ── Popup selector de tornillo ────────────────────────────────────────────
+  /// Popup contextual que aparece al tocar un agujero de la placa para elegir tornillo.
   Widget _buildScrewPopup(BuildContext context) {
     final screen  = MediaQuery.of(context).size;
     // El tap viene en coordenadas CSS del WebView (0,0 = top-left del WebView).
@@ -6091,7 +6142,7 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
     );
   }
 
-  // ── Widget vistas rápidas ───────────────────────────────────────────────────
+  /// Panel flotante de vistas predefinidas (Frontal, Lateral, Superior, Inferior).
   Widget _buildVistaPanel() {
     final vistas = [
       (0, 'Frontal',    Icons.crop_portrait,          'Eje Z'),
@@ -6184,6 +6235,7 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
   }
 
   // ── Botón Limpiar (debajo de la flecha atrás) ────────────────────────────
+  /// Botón flotante "Limpiar" que oculta todos los modelos y resetea la escena.
   Widget _buildBtnLimpiar() {
     return Positioned(
       top: 72, left: 8,
@@ -6216,7 +6268,7 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
     );
   }
 
-  // ── Botón Ghost (sombra on/off, debajo de Limpiar) ───────────────────────
+  /// Botón flotante que alterna la capa "ghost" (silueta semitransparente) del visor.
   Widget _buildBtnGhost() {
     return Positioned(
       top: 114, left: 8,
@@ -7101,6 +7153,7 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
     }
   }
 
+  /// Resetea por completo la escena: oculta todas las capas, elimina tornillos y reglas.
   void _limpiarVisor() {
     // Limpiar estado Dart
     setState(() {
@@ -7276,6 +7329,7 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
     );
   }
 
+  /// Abre el panel de notas de voz como dialog centrado.
   void _abrirNotasVoz() {
     showDialog(
       context: context,
@@ -7288,6 +7342,7 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
     );
   }
 
+  /// Muestra un snackbar cuando el caso no tiene documentación PDF generada.
   void _sinDocumentacion() {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
@@ -7297,6 +7352,7 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
     ));
   }
 
+  /// Barra superior del visor con botón atrás, nombre del caso y acciones rápidas.
   Widget _buildTopBar() {
     return Positioned(
       top: 0, left: 0, right: 0,
@@ -7369,7 +7425,8 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
     );
   }
 
-  // ── Panel lateral ─────────────────────────────────────────────────────────
+  /// Panel lateral flotante con capas, tornillos colocados y mediciones.
+  /// Se puede arrastrar con long-press y redimensionar verticalmente.
   Widget _buildPanelLateral() {
     final size    = MediaQuery.of(context).size;
     final padding = MediaQuery.of(context).padding;
@@ -7516,6 +7573,7 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
     );
   }
 
+  /// Fila de pestañas del panel lateral (Capas, Tornillos, Notas, Mediciones).
   Widget _buildTabs() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(8, 10, 8, 8),
@@ -7558,6 +7616,7 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
     );
   }
 
+  /// Contenido de la pestaña "Capas": lista de modelos GLB con toggle y controles.
   Widget _buildContenidoCapas() {
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Padding(
@@ -7802,6 +7861,7 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
     ]);
   }
 
+  /// Contenido de la pestaña "Tornillos": lista de tornillos insertados con controles.
   Widget _buildContenidoColocados() {
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       _seccionHeader('TORNILLOS COLOCADOS', Icons.check_circle_outline, _C.accentScrew),
@@ -7821,6 +7881,7 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
     ]);
   }
 
+  /// Fila de la lista de tornillos con botones de visibilidad, regla y eliminación.
   Widget _tornilloColocadoItem(TornilloColocado tc) {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
@@ -7887,6 +7948,7 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
     ]),
   );
 
+  /// Fila expandible de un grupo de placas en el panel de capas.
   Widget _grupoPlacas(int gi, GrupoPlagas grupo, int off) {
     final exp = _grupoExpandido[gi] ?? false;
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -7921,6 +7983,7 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
     ]);
   }
 
+  /// Fila de una capa GLB individual con toggle de visibilidad, opacidad y trayectorias.
   Widget _capaItem(int idx, GlbArchivo glb) {
     final visible  = _visibles[idx] ?? false;
     final color    = glb.tipo == 'biomodelo' ? _C.accentBone : _C.accentImplant;
@@ -8121,6 +8184,7 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
     );
   }
 
+  /// Abre un bottom-sheet con paleta de colores predefinidos para el modelo en [idx].
   void _mostrarColorPicker(int idx) {
     final colores = [
       Colors.white,
@@ -8178,6 +8242,7 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
     );
   }
 
+  /// Panel inferior de plano de corte: selector de eje y slider de posición.
   Widget _buildPanelCorte() {
     final ejesLabels = ['X', 'Y', 'Z'];
     final ejesIcons  = [Icons.swap_horiz, Icons.swap_vert, Icons.open_in_full];
@@ -8269,6 +8334,7 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
     );
   }
 
+  /// Muestra el bottom-sheet de resumen de sesión: placas activas, tornillos e historial.
   void _mostrarInfoCaso(BuildContext context) async {
     final prefs    = await SharedPreferences.getInstance();
     // Leer historial acumulado: sesiones separadas por ||
@@ -8365,6 +8431,7 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
     );
   }
 
+  /// Cabecera de sección dentro del resumen de sesión (p.ej. "TORNILLOS").
   Widget _historialSeccion({required String titulo, required IconData icono, required Color color, required List<Widget> items}) {
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Row(children: [
@@ -8378,6 +8445,7 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
     ]);
   }
 
+  /// Fila de un elemento del historial (tornillo o placa) con número, nombre y largo.
   Widget _historialItem({required int numero, required String nombre, required String largo, required Color color}) {
     return Container(
       margin: const EdgeInsets.only(bottom: 6),
@@ -8403,6 +8471,7 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
     );
   }
 
+  /// Fila de estado vacío cuando no hay elementos en una sección del historial.
   Widget _historialItemVacio(String msg) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),
@@ -8411,6 +8480,7 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
     );
   }
 
+  /// Fila de dato simple (icono + etiqueta + valor) en el resumen de sesión.
   Widget _infoFila(IconData icon, String label, String valor) {
     if (valor.isEmpty) return const SizedBox.shrink();
     return Padding(
@@ -8425,6 +8495,7 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
     );
   }
 
+  /// Contenido de la pestaña "Mediciones": lista de reglas libres con toggle y eliminación.
   Widget _buildContenidoMediciones() {
     const azul = Color(0xFF64D2FF);
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -8524,6 +8595,7 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
     ]);
   }
 
+  /// Contenido de la pestaña "Notas": lista de anotaciones 3D con toggle y eliminación.
   Widget _buildContenidoNotas() {
     const amarillo = Color(0xFFFFD60A);
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -8622,6 +8694,7 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
   Widget _marqueeText(String text, TextStyle style) =>
       _MarqueeText(text: text, style: style);
 
+  /// Panel de métricas de desplazamiento/rotación de la placa mientras se arrastra.
   Widget _buildPlacaDesplazamientoPanel() {
     final azul = const Color(0xFF2A7FF5);
     final d = _placaDesplazamiento;

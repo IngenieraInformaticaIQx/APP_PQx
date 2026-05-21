@@ -2,6 +2,9 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:webview_windows/webview_windows.dart';
 
+/// Widget que encapsula WebView2 (webview_windows) para renderizar el visor 3D en Windows.
+/// Actúa como adaptador entre los canales JS de three.js y los callbacks de Dart,
+/// equivalente a los JavaScriptChannels de webview_flutter en otras plataformas.
 class VisorWindows extends StatefulWidget {
   final String? url;
   final String? htmlContent;
@@ -53,6 +56,7 @@ class VisorWindowsState extends State<VisorWindows> {
     _init();
   }
 
+  /// Inicializa el WebView2, suscribe el listener de mensajes JS y carga el contenido.
   Future<void> _init() async {
     await _controller.initialize();
 

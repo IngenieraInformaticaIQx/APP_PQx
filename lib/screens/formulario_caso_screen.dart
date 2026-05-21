@@ -25,6 +25,8 @@ import 'package:untitled/services/app_theme.dart';
 // ─────────────────────────────────────────────────────────────────────────────
 //  Entry point desde CapturaRxScreen (tipoVisor + paths directos)
 // ─────────────────────────────────────────────────────────────────────────────
+/// Punto de entrada desde [CapturaRxScreen]: crea un [PlanificacionLocal] inicial
+/// con las fotos capturadas y navega a [MedicionManualMilimetricaScreen].
 class FormularioCasoScreen extends StatelessWidget {
   final TipoVisor tipoVisor;
   final String?   fotoPath;
@@ -55,6 +57,9 @@ class FormularioCasoScreen extends StatelessWidget {
   }
 }
 
+/// Pantalla de medición manual milimétrica sobre la radiografía.
+/// Permite al usuario marcar puntos de referencia en la imagen para calibrar
+/// la escala y extraer medidas anatómicas antes de enviar a la IA.
 class MedicionManualMilimetricaScreen extends StatefulWidget {
   final PlanificacionLocal plan;
   const MedicionManualMilimetricaScreen({super.key, required this.plan});
@@ -205,6 +210,7 @@ class _MedicionManualMilimetricaScreenState
 
   // ── Anotación ─────────────────────────────────────────────────────────────────
 
+  /// Registra un tap del usuario como punto de calibración/medición sobre la imagen.
   void _registrarPunto(Offset imagePoint) {
     if (_seleccionado == null) return;
     final id = _seleccionado!;
@@ -215,10 +221,12 @@ class _MedicionManualMilimetricaScreenState
     setState(() => _puntos[tabKey]![id] = pts);
   }
 
+  /// Elimina los puntos marcados para una medición concreta.
   void _limpiarPuntos(String id, String tabKey) {
     setState(() => _puntos[tabKey]!.remove(id));
   }
 
+  /// Valida que todas las medidas estén completas y navega a [ProcesandoIAScreen].
   void _procesarManual() {
     if (!_puedeProcesar) return;
     HapticFeedback.mediumImpact();
@@ -279,6 +287,7 @@ class _MedicionManualMilimetricaScreenState
     );
   }
 
+  /// Vista de error cuando no se puede cargar la imagen.
   Widget _buildError() {
     return Center(
       child: Column(mainAxisSize: MainAxisSize.min, children: [
@@ -297,6 +306,7 @@ class _MedicionManualMilimetricaScreenState
     );
   }
 
+  /// Estructura general: header + body con imagen y panel de medidas.
   Widget _buildContent() {
     return Column(children: [
       _buildHeader(),
@@ -304,6 +314,7 @@ class _MedicionManualMilimetricaScreenState
     ]);
   }
 
+  /// Barra superior con título, instrucción y selector de proyección (Frontal/Lateral).
   Widget _buildHeader() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
@@ -396,6 +407,7 @@ class _MedicionManualMilimetricaScreenState
     });
   }
 
+  /// Área de visualización de la imagen con tabs (si hay proyección lateral).
   Widget _buildImageArea() {
     return Column(children: [
       if (_hayLateral) _buildTabBar(),
@@ -403,6 +415,7 @@ class _MedicionManualMilimetricaScreenState
     ]);
   }
 
+  /// Selector de proyección Frontal / Lateral cuando hay ambas imágenes.
   Widget _buildTabBar() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
@@ -447,6 +460,7 @@ class _MedicionManualMilimetricaScreenState
     );
   }
 
+  /// Panel central con la imagen y el canvas de anotaciones interactivo.
   Widget _buildImagePanel() {
     final path = _imagenActivaPath;
     final imageSize = _imagenActivaSize;
@@ -501,6 +515,7 @@ class _MedicionManualMilimetricaScreenState
     );
   }
 
+  /// Panel lateral de medidas (visible en pantallas anchas).
   Widget _buildSidePanel() {
     return SizedBox(
       width: 320,
@@ -511,6 +526,7 @@ class _MedicionManualMilimetricaScreenState
     );
   }
 
+  /// Panel inferior de medidas (visible en pantallas estrechas / móvil).
   Widget _buildBottomPanel() {
     return SizedBox(
       height: 300,
@@ -859,6 +875,8 @@ class _AnotacionPainter extends CustomPainter {
 // ─────────────────────────────────────────────────────────────────────────────
 //  ProcesandoIAScreen — pantalla de procesado IA
 // ─────────────────────────────────────────────────────────────────────────────
+/// Pantalla de procesado con IA: envía la radiografía a Gemini, escala los GLB
+/// y muestra el panel de confianza antes de abrir el visor 3D.
 class ProcesandoIAScreen extends StatefulWidget {
   final PlanificacionLocal plan;
   final Map<String, double>? medidasManual;
@@ -1053,6 +1071,7 @@ class _ProcesandoIAScreenState extends State<ProcesandoIAScreen>
     });
   }
 
+  /// Navega al [VisorCasoScreen] con el caso preparado por la IA.
   void _continuarAlVisor() {
     final caso = _casoPreparado;
     if (caso == null) return;
@@ -1068,6 +1087,7 @@ class _ProcesandoIAScreenState extends State<ProcesandoIAScreen>
     );
   }
 
+  /// Descarta el resultado y vuelve a medir (manual o IA) limpiando caché Gemini.
   Future<void> _remedirRadiografia() async {
     HapticFeedback.mediumImpact();
     if (_modoManual) {
@@ -1090,6 +1110,7 @@ class _ProcesandoIAScreenState extends State<ProcesandoIAScreen>
     await _procesarFoto();
   }
 
+  /// Descarga el catálogo de implantes compatibles con Rx desde el servidor.
   Future<(List<GrupoPlagas>, List<GrupoTornillos>)> _cargarCatalogoImplantesRx() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -1197,6 +1218,7 @@ class _ProcesandoIAScreenState extends State<ProcesandoIAScreen>
     }
   }
 
+  /// Cancela el procesado y vuelve a la pantalla anterior para reintentar.
   void _reintentar() {
     _pasoTimer?.cancel();
     if (!mounted) return;
@@ -1312,8 +1334,7 @@ class _ProcesandoIAScreenState extends State<ProcesandoIAScreen>
     );
   }
 
-  // ── Pantalla de procesado ─────────────────────────────────────────────────────
-
+  /// Vista animada de progreso paso a paso mientras la IA procesa la radiografía.
   Widget _buildProcesando() {
     return SingleChildScrollView(
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
@@ -1549,6 +1570,8 @@ class _ProcesandoIAScreenState extends State<ProcesandoIAScreen>
   // ── Panel de confianza (entre procesado y visor) ─────────────────────────
   // Stub mínimo funcional: muestra la confianza y deja continuar al visor o
   // re-medir limpiando la caché. Diseño detallado pendiente.
+  /// Panel de resultado: muestra la confianza del análisis IA, métricas de calibración
+  /// y permite continuar al visor o repetir la medición.
   Widget _buildConfianza(RxProcessorResult result) {
     final dark = AppTheme.darkText;
 
@@ -1759,8 +1782,7 @@ class _ProcesandoIAScreenState extends State<ProcesandoIAScreen>
     );
   }
 
-  // ── Pantalla de error ─────────────────────────────────────────────────────────
-
+  /// Vista de error con mensaje descriptivo y botón para reintentar.
   Widget _buildError() {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20),
