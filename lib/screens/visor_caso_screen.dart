@@ -7440,7 +7440,7 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
     // viewPadding.bottom es el inset físico real (no consumido por Scaffold), más fiable que padding.bottom
     final double sysBottom = MediaQuery.of(context).viewPadding.bottom;
     // Altura máxima: handle (20) + margen app (72: botones inferiores) + inset sistema
-    final double maxPanelHeight = size.height - sysBottom - effectivePanelTop - 20 - 110;
+    final double maxPanelHeight = math.max(160.0, size.height - sysBottom - effectivePanelTop - 20 - 110);
     final double displayPanelHeight = _panelHeight.clamp(160.0, maxPanelHeight);
 
     return AnimatedPositioned(
@@ -7465,7 +7465,7 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
             _panelDragLastPos = d.globalPosition;
             _panelTopOffset = (_panelTopOffset + delta.dy).clamp(
               minPanelTop,
-              size.height - 160.0,
+              size.height - sysBottom - 160.0 - 60.0 - 20.0,
             );
             _panelLeftOffset = (_panelLeftOffset + delta.dx).clamp(
               8.0,
@@ -7548,7 +7548,7 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
             GestureDetector(
               onVerticalDragUpdate: (d) {
                 setState(() {
-                  _panelHeight = (_panelHeight + d.delta.dy).clamp(160.0, size.height - sysBottom - effectivePanelTop - 130.0);
+                  _panelHeight = (_panelHeight + d.delta.dy).clamp(160.0, math.max(160.0, size.height - sysBottom - effectivePanelTop - 130.0));
                 });
               },
               child: Container(
