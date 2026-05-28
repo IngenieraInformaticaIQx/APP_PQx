@@ -2203,13 +2203,13 @@ class _VisorCasoScreenState extends State<VisorCasoScreen> {
     pointer-events:none;z-index:10;user-select:none;
   }
   #watermark .wm-nombre{
-    font-family:-apple-system,sans-serif;font-size:28px;font-weight:900;
-    letter-spacing:5px;color:rgba(120,120,120,0.35);text-transform:uppercase;
+    font-family:-apple-system,sans-serif;font-size:18px;font-weight:900;
+    letter-spacing:4px;color:rgba(120,120,120,0.35);text-transform:uppercase;
     text-align:center;line-height:1.1;
   }
   #watermark .wm-paciente{
-    font-family:-apple-system,sans-serif;font-size:13px;font-weight:600;
-    letter-spacing:3px;color:rgba(26,26,46,0.13);margin-top:6px;
+    font-family:-apple-system,sans-serif;font-size:10px;font-weight:600;
+    letter-spacing:3px;color:rgba(26,26,46,0.13);margin-top:4px;
     text-align:center;text-transform:uppercase;
   }
   .spinner{width:34px;height:34px;border:2.5px solid rgba(42,127,245,0.2);
@@ -5491,6 +5491,29 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
                 ),
               ),
             ),
+            // Marca de agua PQX — centro inferior, encima del watermark de texto
+            Positioned(
+              bottom: 108,
+              left: 0,
+              right: 0,
+              child: IgnorePointer(
+                child: Center(
+                  child: Opacity(
+                    opacity: 0.18,
+                    child: ColorFiltered(
+                      colorFilter: ColorFilter.mode(
+                        AppTheme.isDark.value ? Colors.white : Colors.black,
+                        BlendMode.srcIn,
+                      ),
+                      child: Image.asset(
+                        'assets/icon/logo.png',
+                        width: (Platform.isAndroid || Platform.isIOS) ? 90 : 140,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
             // ── UI oculta en modo fullscreen ──────────────────────────────
             if (!_modoFullscreen) ...[
             // Watermark se renderiza dentro del WebView
@@ -7523,6 +7546,7 @@ setTimeout(()=>{ document.getElementById('loading').style.display='none'; VisorR
                         duration: const Duration(milliseconds: 180),
                         transitionBuilder: (child, anim) => FadeTransition(opacity: anim, child: child),
                         layoutBuilder: (currentChild, previousChildren) => Stack(
+                          fit: StackFit.expand,
                           alignment: Alignment.topCenter,
                           children: [...previousChildren, if (currentChild != null) currentChild],
                         ),
